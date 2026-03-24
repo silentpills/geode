@@ -69,7 +69,7 @@ jobs:
         run: docker build -t gnss-backend ./web/backend
 
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: gnss-backend
           format: table
@@ -82,7 +82,7 @@ jobs:
           VITE_API_URL: http://localhost
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: gnss-frontend
           format: table
