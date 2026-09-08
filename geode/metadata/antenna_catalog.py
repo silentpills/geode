@@ -11,6 +11,7 @@ def normalize_pair(antenna_code: str, radome_code: str) -> tuple[str, str]:
             not value
             or len(value) > limit
             or not value.isascii()
+            or not value.isprintable()
             or any(c.isspace() for c in value)
         ):
             raise ValueError(

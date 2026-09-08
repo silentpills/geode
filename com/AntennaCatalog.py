@@ -2,6 +2,7 @@
 """Register antenna/radome identities without importing calibration values."""
 
 import argparse
+from pathlib import Path
 
 from geode.metadata.antenna_catalog import (
     normalize_pair,
@@ -44,7 +45,8 @@ def main():
     from geode import dbConnection
     from geode.config import get_gnss_data_cfg_path
 
-    cnn = dbConnection.Cnn(get_gnss_data_cfg_path())
+    config_path = Path(get_gnss_data_cfg_path())
+    cnn = dbConnection.Cnn(str(config_path) if config_path.is_file() else None)
     try:
         added = register_pairs(cnn.cnn, pairs)
     finally:

@@ -100,6 +100,7 @@ def test_failed_cluster_submission_does_not_wait():
         "StationReport",
         "StationKmz",
         "CampaignPlanner",
+        "AntennaCatalog",
     ],
 )
 def test_cli_help_requires_no_database(tool, tmp_path):
