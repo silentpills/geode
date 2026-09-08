@@ -33,6 +33,7 @@ types-requests = "*"
 types-paramiko = "*"
 # psycopg (v3) ships with inline type annotations (py.typed), no stub needed
 types-setuptools = "*"
+postgresql = ">=18.4,<19"
 
 [feature.dev.pypi-dependencies]
 # Type checker (using ty by Astral - makers of ruff and uv)
@@ -45,6 +46,7 @@ pre-commit = "*"
 commitizen = "*"
 
 [pypi-dependencies]
+geode-gnss = { path = ".", editable = true }
 country-converter = "*"
 dirsync = "*"
 dispy = "*"

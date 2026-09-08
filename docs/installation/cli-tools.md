@@ -4,18 +4,17 @@ This guide covers configuring and running GeoDE command-line tools for GNSS proc
 
 ## Installation
 
-Install GeoDE in your Python environment:
+Use this fork's `dev` checkout for both development and deployment:
 
 ```bash
-pip install geode-gnss
+git clone --branch dev https://github.com/silentpills/geode.git
+cd geode
+pixi install --locked
 ```
 
-Or with Pixi (recommended for development):
-
-```bash
-pixi install
-pixi shell
-```
+Pixi installs the local source as an editable package in `.pixi/envs/default`.
+Use `pixi run python -m com.<Tool>` from the repository root. Installing
+`geode-gnss` from PyPI installs the published package, which may differ from this fork.
 
 ## Configuration File
 
@@ -23,7 +22,7 @@ Copy the example configuration file to your working directory and customize it:
 
 ```bash
 cp gnss_data.cfg.example gnss_data.cfg
-# Edit gnss_data.cfg with your database credentials and paths
+# Set database credentials in .env; set processing paths in gnss_data.cfg
 ```
 
 GeoDE commands look for `gnss_data.cfg` in the current working directory.
@@ -82,20 +81,20 @@ atx = /path/to/resources/atx/igs20_2335_plus.atx
 
 ## Running Commands
 
-Once configured, run GeoDE from any folder containing the `.cfg` file:
+Once configured, run GeoDE from the repository root:
 
 ```bash
 # Plot ETM for a station
-PlotETM.py igm1
+pixi run python -m com.PlotETM igm1
 
 # Scan archive for RINEX files
-ScanArchive.py igs.all -rinex 1
+pixi run python -m com.ScanArchive igs.all -rinex 1
 
 # Download data for stations
-DownloadSources.py rms.all -date 2024.001 2024.365
+pixi run python -m com.DownloadSources rms.all -date 2024.001 2024.365
 
 # Run archive service
-ArchiveService.py
+pixi run python -m com.ArchiveService
 ```
 
 ## Station List Syntax
@@ -119,37 +118,37 @@ Most commands accept a station list argument with flexible syntax:
 
 ```bash
 # Scan archive and add RINEX files
-ScanArchive.py net.all -rinex 0
+pixi run python -m com.ScanArchive net.all -rinex 0
 
 # Or scan everything (ignore station list)
-ScanArchive.py net.all -rinex 1
+pixi run python -m com.ScanArchive net.all -rinex 1
 ```
 
 ### Running PPP
 
 ```bash
 # Run PPP for date range
-ScanArchive.py net.all -ppp 2024.001 2024.100
+pixi run python -m com.ScanArchive net.all -ppp 2024.001 2024.100
 ```
 
 ### Plotting Time Series
 
 ```bash
 # Interactive plot
-PlotETM.py station_code -gui
+pixi run python -m com.PlotETM station_code -gui
 
 # Save to directory
-PlotETM.py net.all -dir /path/to/output
+pixi run python -m com.PlotETM net.all -dir /path/to/output
 ```
 
 ### Downloading Data
 
 ```bash
 # Download for last 30 days
-DownloadSources.py net.all -win 30
+pixi run python -m com.DownloadSources net.all -win 30
 
 # Download specific date range
-DownloadSources.py net.all -date 2024/01/01 2024/12/31
+pixi run python -m com.DownloadSources net.all -date 2024/01/01 2024/12/31
 ```
 
 ## Next Steps

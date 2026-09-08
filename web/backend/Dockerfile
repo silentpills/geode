@@ -31,14 +31,17 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /code
-COPY . /code/
+COPY web/backend/ /code/
+COPY pyproject.toml README.md LICENSE /opt/geode/
+COPY geode/ /opt/geode/geode/
+COPY com/ /opt/geode/com/
 RUN mkdir -p /var/log/gunicorn && chmod 755 /var/log/gunicorn
 
 # Now install requirements using uv
-RUN uv pip install --system --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache-dir -r requirements.txt /opt/geode
 
-COPY ./supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY ./entrypoint.sh /entrypoint.sh
+COPY web/backend/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY web/backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

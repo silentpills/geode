@@ -36,5 +36,4 @@ uritemplate==4.1.1
 gunicorn>=22.0,<24.0
 celery~=5.5.0
 redis~=5.2.0
-geode-gnss
 country_converter==1.3

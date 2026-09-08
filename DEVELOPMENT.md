@@ -12,7 +12,8 @@ pixi run precommit:install  # Setup git hooks (recommended!)
 
 Pixi keeps this repository's environments in `.pixi/envs/`; no separate uv or
 virtualenv setup is needed. Run tools through `pixi run` so they use the locked
-Python and dependencies. Python 3.13+ uses `legacy-cgi` for the existing Dispy
+Python and dependencies. Pixi installs this checkout as an editable package, so
+CLI commands and imports use your current changes. Python 3.13+ uses `legacy-cgi` for the existing Dispy
 monitoring server until the planned Celery migration replaces Dispy.
 
 ## 📦 Pixi Environments
@@ -64,7 +65,7 @@ pixi run precommit:run      # Run all hooks manually
 
 ### All Checks (CI-like)
 ```bash
-pixi run check          # Runs: lint + format:check + test
+pixi run check          # Runs: lint + format:check + typecheck + test
 ```
 
 ## 📝 Commit Message Format

@@ -2,21 +2,18 @@
 
 GeoDE requires Python 3.10 or later.
 
-Once installed, you can run GeoDE from any folder containing the `.cfg` file
-with the configuration to access the RINEX and orbits archive, database, etc.
-Commands are included in your PATH so you can execute, for example `PlotETM.py
-igm1`
+Use the `dev` branch of this fork for development and deployment. `main` mirrors
+upstream and does not contain the fork's complete deployment setup.
 
-## As a Library
-
-GeoDE can be installed using pip:
+Commands run through Pixi from the repository root, for example:
 
 ```bash
-pip install geode-gnss
+pixi run python -m com.PlotETM --help
 ```
 
-This will install the python libraries and dependencies, but does not setup
-the database tools.
+For a library installation outside Pixi, install the checked-out source with
+`python -m pip install .`. The published `geode-gnss` package on PyPI may differ
+from this fork.
 
 ## As a Development or Production Environment
 
@@ -25,14 +22,14 @@ We recommend using [Pixi](https://pixi.sh/) to manage the Python environment and
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/demiangomez/Parallel.GAMIT.git
+git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
 ```
 
 ### 2. Install Dependencies
 
 ```bash
-pixi install
+pixi install --locked
 ```
 
 ### 3. Activate the Environment
@@ -67,3 +64,18 @@ Create `gnss_data.cfg` in your working directory. See [CLI Tools Setup](docs/ins
 ## Web Interface (Optional)
 
 To deploy the web interface, see [Web Interface Setup](docs/installation/web-interface.md).
+
+## Backend source and Docker builds
+
+`docker compose build backend` installs both the backend dependencies and the
+GeoDE library from this checkout. To build the backend image directly, run from
+the repository root:
+
+```bash
+docker build -f web/backend/Dockerfile -t gnss-backend .
+```
+
+The repository's Docker ignore rules exclude `.env`, local environments, and
+media/log directories from the build context. Keep credentials in `.env` and pass
+them at runtime through Compose. A source archive without Git metadata reports
+package version `0.0.0`; builds from a Git checkout can use setuptools-scm metadata.

@@ -1,6 +1,6 @@
 site_name: GeoDE
 site_description: Geodesy Database Engine - Python framework for automated GNSS data processing
-repo_url: https://github.com/demiangomez/Parallel.GAMIT
+repo_url: https://github.com/silentpills/geode
 
 theme:
   name: material

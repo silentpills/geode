@@ -27,7 +27,9 @@ Before installing GeoDE, ensure you have the following external dependencies. So
 For time series analysis and library usage:
 
 ```bash
-pip install geode-gnss
+git clone --branch dev https://github.com/silentpills/geode.git
+cd geode
+pixi install --locked
 ```
 
 This installs Python libraries and dependencies but does not set up database tools.

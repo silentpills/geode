@@ -20,7 +20,8 @@ services:
   backend:
     container_name: gnss-backend
     build:
-      context: ./web/backend
+      context: .
+      dockerfile: web/backend/Dockerfile
       args:
         USER_ID_TO_SAVE_FILES: ${USER_ID_TO_SAVE_FILES}
         GROUP_ID_TO_SAVE_FILES: ${GROUP_ID_TO_SAVE_FILES}

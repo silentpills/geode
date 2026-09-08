@@ -1,0 +1,15 @@
+.git
+.pixi
+.venv
+.env
+.env.*
+**/__pycache__
+**/*.py[cod]
+**/node_modules
+web/backend/logs
+web/backend/media
+web/frontend
+site
+dist
+build
+*.egg-info

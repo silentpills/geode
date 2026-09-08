@@ -41,7 +41,7 @@ Ensure the following dependencies are installed and available in your PATH:
 
 ### Database Setup
 
-1. Deploy the database skeleton using `database/gnss_data_dump.sql`
+1. Deploy the database skeleton using `database/schema.sql`
 2. Configure required tables using the provided CSV files:
    - `keys.csv` - System configuration keys
    - `rinex_tank_struct.csv` - RINEX file storage structure
@@ -51,10 +51,14 @@ Ensure the following dependencies are installed and available in your PATH:
 ### CLI Installation
 
 ```bash
-pip install geode-gnss
+git clone --branch dev https://github.com/silentpills/geode.git
+cd geode
+pixi install --locked
 ```
 
-Create a working directory and configure `gnss_data.cfg` with your database connection, archive paths, and compute nodes. See [Installation.md](Installation.md) for detailed configuration options.
+Use `.env` for database credentials and `gnss_data.cfg` for archive paths, external executables, and compute nodes. Run commands from this checkout with `pixi run python -m com.PlotETM --help`, for example. See [INSTALL.md](INSTALL.md) for setup.
+
+The `dev` branch contains both the processing library and web application. The backend Docker image builds the library from this checkout, so deploying the fork does not depend on a separate upstream release. `main` is kept as an upstream mirror.
 
 ## Core CLI Tools
 

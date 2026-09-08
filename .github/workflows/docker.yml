@@ -6,6 +6,10 @@ on:
     paths:
       - "web/backend/Dockerfile"
       - "web/backend/requirements.txt"
+      - "geode/**"
+      - "com/**"
+      - "pyproject.toml"
+      - ".dockerignore"
       - "web/frontend/Dockerfile"
       - "web/frontend/package.json"
       - "web/frontend/package-lock.json"
@@ -16,6 +20,10 @@ on:
     paths:
       - "web/backend/Dockerfile"
       - "web/backend/requirements.txt"
+      - "geode/**"
+      - "com/**"
+      - "pyproject.toml"
+      - ".dockerignore"
       - "web/frontend/Dockerfile"
       - "web/frontend/package.json"
       - "web/frontend/package-lock.json"
@@ -50,7 +58,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build backend image
-        run: docker build -t gnss-backend ./web/backend
+        run: docker build -f web/backend/Dockerfile -t gnss-backend .
 
       - name: Build frontend image
         run: docker build -t gnss-frontend ./web/frontend
@@ -66,7 +74,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build backend image
-        run: docker build -t gnss-backend ./web/backend
+        run: docker build -f web/backend/Dockerfile -t gnss-backend .
 
       - name: Scan backend image
         uses: aquasecurity/trivy-action@0.33.1
