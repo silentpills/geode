@@ -6,7 +6,7 @@ COPY geode/ /app/geode/
 COPY com/ /app/com/
 RUN pixi install --locked -e runtime && pixi shell-hook -e runtime -s bash > /app/runtime-hook.sh
 
-FROM ubuntu:24.04 AS runtime
+FROM ubuntu:26.04 AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.pixi/envs/runtime/bin:$PATH" \
