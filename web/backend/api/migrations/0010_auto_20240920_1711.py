@@ -5,8 +5,9 @@ from django.conf import settings
 import psycopg
 
 def connect_to_db():
-    conn = psycopg.connect(
-        f'dbname={settings.DATABASES["default"]["NAME"]} user={settings.DATABASES["default"]["USER"]} password={settings.DATABASES["default"]["PASSWORD"]} host={settings.DATABASES["default"]["HOST"]} port={settings.DATABASES["default"]["PORT"]}')
+    db = settings.DATABASES["default"]
+    conn = psycopg.connect(dbname=db["NAME"], user=db["USER"],
+                           password=db["PASSWORD"], host=db["HOST"], port=db["PORT"])
 
     cur = conn.cursor()
 
@@ -46,18 +47,8 @@ def create_update_gaps_user(apps, schema_editor):
 
     update_gaps_status_role.endpoints_clusters.add(EndPointsCluster.objects.get(resource=resource.objects.get(name='gaps-status'),
                                                                              cluster_type=cluster_type.objects.get(name="read-write"), role_type='API'))
-    # !pwyCZC=E#m*7Y,
-    User.objects.get_or_create(
-        password="argon2$argon2id$v=19$m=102400,t=2,p=8$VWIwVFVST2xlSjBsUW9oaWlkbEpWQw$1ZTMJqOL4rZ8ty7v6Ih76UioLxCZoHAiwr4V3L1/2do",
-        is_superuser=False,
-        username="update-gaps-status",
-        first_name="",
-        last_name="",
-        email="",
-        is_staff=False,
-        is_active=True,
-        role=update_gaps_status_role
-    )
+    # Retain the integration role, but do not create a network login account.
+
 
 
 def replace_station_function(apps, schema_editor):
@@ -95,8 +86,9 @@ def replace_station_function(apps, schema_editor):
         print("Executing: ", query)
         cur.execute(query)
     except Exception as e:
-        print(f"Exception when creating function. Continuing...")
+        print(f"Failed to create required function.")
         conn.rollback()
+        raise
     else:
         conn.commit()
     finally:

@@ -21,8 +21,9 @@ def create_countries(apps, schema_editor):
 
 
 def connect_to_db():
-    conn = psycopg.connect(
-        f'dbname={settings.DATABASES["default"]["NAME"]} user={settings.DATABASES["default"]["USER"]} password={settings.DATABASES["default"]["PASSWORD"]} host={settings.DATABASES["default"]["HOST"]} port={settings.DATABASES["default"]["PORT"]}')
+    db = settings.DATABASES["default"]
+    conn = psycopg.connect(dbname=db["NAME"], user=db["USER"],
+                           password=db["PASSWORD"], host=db["HOST"], port=db["PORT"])
 
     cur = conn.cursor()
 
@@ -98,25 +99,6 @@ def add_ant_daz_field_to_stationinfo(conn, cur):
     conn.close()
 
 
-def create_admin_user(apps, schema_editor):
-
-    Role = apps.get_model("api", "Role")
-    User = apps.get_model("api", "User")
-
-    admin_role = Role.objects.get_or_create(
-        name="admin", role_api=False, allow_all=True)
-
-    User.objects.get_or_create(
-        password="argon2$argon2id$v=19$m=102400,t=2,p=8$ZHlsUlkxdE44YW1rV2E3OWo0VG44cQ$ZqzbGLeeekVmK99p9zOkPShiZzAnkH03oLOO35TlSvk",
-        is_superuser=False,
-        username="admin",
-        first_name="",
-        last_name="",
-        email="",
-        is_staff=False,
-        is_active=True,
-        role=admin_role[0]
-    )
 
 
 def create_endpoints(apps, schema_editor):
@@ -733,58 +715,8 @@ def create_endpoints_cluster(apps, schema_editor):
         *endpoint.objects.filter(path="/api/visits/<PATH_PARAM>", method__in=["PUT", "PATCH"]))
 
 
-def create_underprivileged_front_user(apps, schema_editor):
-
-    Role = apps.get_model("api", "Role")
-    User = apps.get_model("api", "User")
-    EndPointsCluster = apps.get_model("api", "EndPointsCluster")
-    cluster_type = apps.get_model("api", "ClusterType")
-    resource = apps.get_model("api", "Resource")
-
-    underprivileged_role = Role.objects.get_or_create(
-        name="underprivileged_front", role_api=False, allow_all=False)[0]
-
-    underprivileged_role.endpoints_clusters.add(EndPointsCluster.objects.get(resource=resource.objects.get(name='stations'),
-                                                                             cluster_type=cluster_type.objects.get(name="read"), role_type='FRONT AND API'))
-
-    User.objects.get_or_create(
-        password="argon2$argon2id$v=19$m=102400,t=2,p=8$azNFTmxWNmw3TmtwaUh4OFBsNXF5TA$bZfPpIW+vzqgk1X0mrRioyWOmJBRTYSxpXwelY50kpk",
-        is_superuser=False,
-        username="underprivileged_front",
-        first_name="",
-        last_name="",
-        email="",
-        is_staff=False,
-        is_active=True,
-        role=underprivileged_role
-    )
 
 
-def create_underprivileged_api_user(apps, schema_editor):
-
-    Role = apps.get_model("api", "Role")
-    User = apps.get_model("api", "User")
-    EndPointsCluster = apps.get_model("api", "EndPointsCluster")
-    ClusterType = apps.get_model("api", "ClusterType")
-    Resource = apps.get_model("api", "Resource")
-
-    underprivileged_role = Role.objects.get_or_create(
-        name="underprivileged_api", role_api=True, allow_all=False)[0]
-
-    underprivileged_role.endpoints_clusters.add(EndPointsCluster.objects.get(resource=Resource.objects.get(name='stations'),
-                                                                             cluster_type=ClusterType.objects.get(name="read"), role_type='FRONT AND API'))
-
-    User.objects.get_or_create(
-        password="argon2$argon2id$v=19$m=102400,t=2,p=8$d05JM2VxVDRNYml6dDlBRkVIMWZxYQ$kVtHD0ErTt7DGDPmOqXykvZJagvgYoZ6nLdqy9Z381Q",
-        is_superuser=False,
-        username="underprivileged_api",
-        first_name="",
-        last_name="",
-        email="",
-        is_staff=False,
-        is_active=True,
-        role=underprivileged_role
-    )
 
 
 def insert_station_status(apps, schema_editor):
@@ -842,8 +774,9 @@ def create_gaps_function(apps, schema_editor):
         print("Executing: ", query)
         cur.execute(query)
     except Exception as e:
-        print(f"Exception when creating function. Continuing...")
+        print(f"Failed to create required function.")
         conn.rollback()
+        raise
     else:
         conn.commit()
     finally:
@@ -938,8 +871,9 @@ def create_stationinfo_function(apps, schema_editor):
         print("Executing: ", query)
         cur.execute(query)
     except Exception as e:
-        print(f"Exception when creating function. Continuing...")
+        print(f"Failed to create required function.")
         conn.rollback()
+        raise
     else:
         conn.commit()
     finally:
@@ -1007,8 +941,9 @@ def create_station_function(apps, schema_editor):
         print("Executing: ", query)
         cur.execute(query)
     except Exception as e:
-        print(f"Exception when creating function. Continuing...")
+        print(f"Failed to create required function.")
         conn.rollback()
+        raise
     else:
         conn.commit()
     finally:
@@ -1053,13 +988,10 @@ class Migration(migrations.Migration):
         migrations.RunPython(add_station_country_code_index),
         migrations.RunPython(add_alias_field_to_station),
         migrations.RunPython(add_ant_daz_field_to_stationinfo),
-        migrations.RunPython(create_admin_user),
         migrations.RunPython(create_endpoints),
         migrations.RunPython(create_endpoints_cluster_types),
         migrations.RunPython(create_resources),
         migrations.RunPython(create_endpoints_cluster),
-        migrations.RunPython(create_underprivileged_front_user),
-        migrations.RunPython(create_underprivileged_api_user),
         migrations.RunPython(insert_station_status),
         migrations.RunPython(insert_default_station_meta),
         migrations.RunPython(create_gaps_function),

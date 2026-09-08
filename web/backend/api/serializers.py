@@ -240,6 +240,11 @@ class StationinfoSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Stationinfo
         fields = '__all__'
+        # Match the processing SQL defaults before comparing equipment records.
+        extra_kwargs = {name: {'default': 0} for name in (
+            'antenna_height', 'antenna_north', 'antenna_east'
+        )}
+
 
     def validate(self, data):
         """

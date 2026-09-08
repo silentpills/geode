@@ -10,10 +10,12 @@ import django.utils.timezone
 from django.conf import settings
 from django.db import migrations, models
 import psycopg
+from geode.schema import bootstrap_processing_schema
 
 def connect_to_db():
-    conn = psycopg.connect(
-        f'dbname={settings.DATABASES["default"]["NAME"]} user={settings.DATABASES["default"]["USER"]} password={settings.DATABASES["default"]["PASSWORD"]} host={settings.DATABASES["default"]["HOST"]} port={settings.DATABASES["default"]["PORT"]}')
+    db = settings.DATABASES["default"]
+    conn = psycopg.connect(dbname=db["NAME"], user=db["USER"],
+                           password=db["PASSWORD"], host=db["HOST"], port=db["PORT"])
 
     cur = conn.cursor()
 
@@ -86,12 +88,14 @@ def add_id_column(apps, schema_editor):
 class Migration(migrations.Migration):
 
     initial = True
+    atomic = False  # The core bootstrap owns its transaction before legacy SQL helpers run.
 
     dependencies = [
         ('auth', '0012_alter_user_first_name_max_length'),
     ]
 
     operations = [
+        migrations.RunPython(bootstrap_processing_schema),
         migrations.RunPython(add_id_column),
         migrations.CreateModel(
             name='Antennas',
@@ -1046,3 +1050,13 @@ class Migration(migrations.Migration):
             constraint=models.UniqueConstraint(fields=('station', 'date'), name='station_date_unique'),
         ),
     ]
+
+# Core tables are owned by the versioned SQL bootstrap, including composite keys
+# and triggers that Django cannot reproduce. Record their ORM state without
+# attempting to recreate them. Web-only tables remain normal Django operations.
+Migration.operations = [
+    migrations.SeparateDatabaseAndState(state_operations=[operation])
+    if isinstance(operation, migrations.CreateModel) and operation.options.get("db_table")
+    else operation
+    for operation in Migration.operations
+]

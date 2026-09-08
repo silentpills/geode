@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.models import AbstractUser
 from django.contrib.postgres.fields import ArrayField
 from auditlog.registry import auditlog
@@ -230,7 +231,7 @@ class Events(BaseModel):
     event_id = models.BigAutoField(primary_key=True)
     # Field name made lowercase.
     event_date = models.DateTimeField(
-        default=lambda: datetime.datetime.now(datetime.timezone.utc), db_column='EventDate')
+        default=timezone.now, db_column='EventDate')
     # Field name made lowercase.
     event_type = models.CharField(
         db_column='EventType', max_length=6, blank=True, null=True)
@@ -450,7 +451,7 @@ class GamitZtd(BaseModel):
 class Keys(BaseModel):
     # Field name made lowercase.
     key_code = models.CharField(
-        db_column='KeyCode', max_length=7)
+        db_column='KeyCode', max_length=7, unique=True)
     # Field name made lowercase.
     total_chars = models.IntegerField(
         db_column='TotalChars', blank=True, null=True)
@@ -652,7 +653,7 @@ class RinexTankStruct(BaseModel):
     level = models.IntegerField(db_column='Level')
     # Field name made lowercase.
     key_code = models.ForeignKey(
-        Keys, models.DO_NOTHING, db_column='KeyCode', blank=True, null=True)
+        Keys, models.DO_NOTHING, db_column='KeyCode', to_field='key_code', blank=True, null=True)
     api_id = models.AutoField(primary_key=True)
 
     class Meta:
@@ -798,13 +799,13 @@ class Stationinfo(BaseModel):
         db_column='AntennaSerial', max_length=20, blank=True, null=True)
     # Field name made lowercase.
     antenna_height = models.DecimalField(
-        db_column='AntennaHeight', max_digits=6, decimal_places=4, blank=True, null=True)
+        db_column='AntennaHeight', max_digits=6, decimal_places=4, default=0)
     # Field name made lowercase.
     antenna_north = models.DecimalField(
-        db_column='AntennaNorth', max_digits=12, decimal_places=4, blank=True, null=True)
+        db_column='AntennaNorth', max_digits=12, decimal_places=4, default=0)
     # Field name made lowercase.
     antenna_east = models.DecimalField(
-        db_column='AntennaEast', max_digits=12, decimal_places=4, blank=True, null=True)
+        db_column='AntennaEast', max_digits=12, decimal_places=4, default=0)
     # Field name made lowercase.
     height_code = models.CharField(
         db_column='HeightCode')

@@ -1,3 +1,4 @@
+from rest_framework.permissions import AllowAny
 from collections import defaultdict
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
@@ -1422,6 +1423,10 @@ class ExecutionsDetail(generics.RetrieveUpdateDestroyAPIView):
 
 
 class HealthCheck(APIView):
+    # Readiness must be usable before the first administrator exists.
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     @extend_schema(
         description="Returns a success message if the API is up and connected to the database.",
         responses={
@@ -1437,7 +1442,16 @@ class HealthCheck(APIView):
         tags=["health-check"]
     )
     def get(self, request, format=None):
-        return Response({'result': "API is up and connected to database"}, status=200)
+        from django.db import DatabaseError, connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        try:
+            executor = MigrationExecutor(connection)
+            if executor.migration_plan(executor.loader.graph.leaf_nodes()):
+                return Response({'result': 'Database migrations pending'}, status=503)
+        except DatabaseError:
+            return Response({'result': 'Database unavailable'}, status=503)
+        return Response({'result': 'Ready'}, status=200)
 
 
 class GamitHtcList(CustomListCreateAPIView):

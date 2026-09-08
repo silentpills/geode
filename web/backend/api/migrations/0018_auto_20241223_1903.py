@@ -6,8 +6,9 @@ import psycopg
 
 
 def connect_to_db():
-    conn = psycopg.connect(
-        f'dbname={settings.DATABASES["default"]["NAME"]} user={settings.DATABASES["default"]["USER"]} password={settings.DATABASES["default"]["PASSWORD"]} host={settings.DATABASES["default"]["HOST"]} port={settings.DATABASES["default"]["PORT"]}')
+    db = settings.DATABASES["default"]
+    conn = psycopg.connect(dbname=db["NAME"], user=db["USER"],
+                           password=db["PASSWORD"], host=db["HOST"], port=db["PORT"])
 
     cur = conn.cursor()
 
@@ -39,6 +40,7 @@ def modify_trigger_when_inserting_stations(apps, schema_editor):
         print(f"Exception ocurred: {e}")
         print("Rolling back...")
         conn.rollback()
+        raise
     else:
         conn.commit()
     finally:

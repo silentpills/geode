@@ -84,7 +84,7 @@ where = ["."]
 include = ["geode*", "com*"]
 
 [tool.setuptools.package-data]
-"geode" = ["sql/*.sql"]
+"geode" = ["sql/*.sql", "sql/bootstrap_v1/*.sql", "sql/bootstrap_v1/csv/*.csv"]
 "geode.elasticity" = ["data/*"]
 "geode.etm.visualization" = ["*.png"]
 "geode.reports" = ["*.png", "flags/*.svg"]
@@ -101,16 +101,10 @@ testpaths = [
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.0.0"  # Managed by setuptools-scm
-tag_format = "v$version"
-version_scheme = "semver"
-version_provider = "scm"
-update_changelog_on_bump = true
-major_version_zero = true
 
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
@@ -174,4 +168,4 @@ exclude = [
 ]
 
 [tool.ty.environment]
-python-version = "3.10"
+python-version = "3.13"

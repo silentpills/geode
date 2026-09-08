@@ -1,205 +1,80 @@
-# Database Setup
+# Database setup
 
-GeoDE relies heavily on a PostgreSQL database. The CLI tools and web interface both operate on the same database — the web UI manages station metadata and monitoring while the CLI tools handle GNSS processing. They should always be configured to point at the same PostgreSQL instance.
+Use PostgreSQL 18 for this fork. The native Pixi test tools and bundled Docker
+server use the same major version. CLI processing and the web application must
+connect to the same database.
 
-Ideally, use two systems: one for the PostgreSQL database engine and another for running GeoDE. While running both on the same computer is possible, it's not recommended for high-efficiency processing.
+## One initialization command
 
-Before importing station equipment history into a new database, populate the
-[antenna/radome catalog](../usage/antenna-catalog.md). Loading the antenna-model
-CSV alone does not register antenna/radome combinations.
-
-## Install PostgreSQL
-
-On your database server (can be remote or local):
+For a new installation, create an empty database owned by your GeoDE database
+user, configure `.env`, and run from the repository root:
 
 ```bash
-sudo apt update
-sudo apt install postgresql
+pixi install --locked -e web
+pixi run -e web db:migrate
+pixi run -e web db:check
 ```
 
-## Network Configuration
+`migrate` creates the processing tables, loads reference CSVs, and installs the
+web tables, roles, permissions, and triggers. It creates **no login accounts**.
+Docker runs the same command at startup; see [Web interface](web-interface.md).
+Even a CLI-only installation can use this initialization command and then run
+processing in the default Pixi environment.
 
-Choose the appropriate configuration based on your setup:
+The packaged `geode/sql/bootstrap_v1/` directory is an immutable bootstrap
+snapshot. `database/schema.sql` and `database/csv` are compatibility symlinks to
+it. Do not edit the snapshot for later schema changes: add a versioned migration.
+`database/seed.sql` remains a manual-import compatibility script; run it from
+`database/` only when deliberately creating a SQL-only schema. Do not import the
+snapshot or CSVs over a database that has already been initialized.
 
-- **Local Setup (Docker on same machine)**: See [Local Development Setup](#local-development-setup)
-- **Remote Setup (database on separate server)**: See [Remote Server Setup](#remote-server-setup)
+The antenna model CSV contains model identities and height conversions. Before
+importing equipment histories, register the required
+[antenna/radome combinations](../usage/antenna-catalog.md).
 
-### Local Development Setup
+## Existing databases
 
-When running PostgreSQL and Docker on the same machine, you need to configure PostgreSQL to accept connections from Docker containers.
+Back up the database and media first. `migrate` recognizes an existing complete
+processing schema and adds the web migrations without recreating those tables
+or replacing processing IDs. An incomplete schema stops initialization and must
+be repaired or restored deliberately.
 
-#### PostgreSQL Listen Address
+Migration 0037 reconciles Django's model history with columns and constraints
+already present in the processing schema. It checks required columns before
+recording that state and adds the explicitly named station-history uniqueness
+constraint if needed. Keep the historical migrations: already recorded migrations
+remain recorded, while fresh installations need the corrected bootstrap path.
+Do not use `--fake` to silence an unexplained mismatch.
 
-Edit `/etc/postgresql/XX/main/postgresql.conf` (replace `XX` with your version):
+The old migrations installed accounts with publicly known passwords. New
+installations no longer receive them. If adopting an older installation, review
+`admin`, `underprivileged_front`, `underprivileged_api`, and `update-gaps-status`;
+disable unused accounts or change their passwords before serving the application.
+Existing users and custom passwords are preserved by this update.
 
-```bash
-# Find your PostgreSQL version
-ls /etc/postgresql/
+## Connection settings
 
-# Edit the config
-sudo nano /etc/postgresql/XX/main/postgresql.conf
-```
+| Setting | Used by |
+| --- | --- |
+| `POSTGRES_HOST`, `POSTGRES_PORT` | Native Pixi / CLI commands |
+| `POSTGRES_CONTAINER_HOST`, `POSTGRES_CONTAINER_PORT` | Docker backend |
+| `POSTGRES_PUBLISHED_PORT` | Host-side port for bundled PostgreSQL |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Both native and Docker connections |
 
-Change:
+Defaults connect native commands to `127.0.0.1:5432` and Docker to
+`postgres:5432`. Changing a published host port does not change the container's
+internal port. If you choose another published port, set the native
+`POSTGRES_PORT` to match it.
 
-```
-#listen_addresses = 'localhost'
-```
+For an external server, create the database/user there and set both connection
+pairs appropriately. A database on the Docker host is reachable from the backend
+through `host.docker.internal`; Compose includes the Linux host-gateway mapping.
+Configure PostgreSQL to accept the actual Docker subnet and intended database
+user using SCRAM authentication. For remote access use a private network or
+restricted server access; the bundled server publishes only on loopback.
 
-To:
-
-```
-listen_addresses = 'localhost,172.17.0.1'
-```
-
-This allows PostgreSQL to accept connections from the Docker bridge gateway while keeping it off public interfaces.
-
-#### PostgreSQL Client Authentication
-
-Edit `/etc/postgresql/XX/main/pg_hba.conf`:
-
-```bash
-sudo nano /etc/postgresql/XX/main/pg_hba.conf
-```
-
-Add this line to allow Docker containers to connect:
-
-```
-# Docker networks (172.16.x.x - 172.31.x.x)
-host    all    geode    172.16.0.0/12    md5
-```
-
-!!! note
-    We use `172.16.0.0/12` instead of `172.17.0.0/16` because Docker Compose creates its own networks in the `172.18.x.x` range, not just the default bridge network.
-
-#### Apply Changes
-
-```bash
-sudo systemctl restart postgresql
-```
-
-#### Docker Configuration
-
-In your `.env` file, use `host.docker.internal` to reach PostgreSQL on the host:
-
-```
-POSTGRES_HOST=host.docker.internal
-```
-
-### Remote Server Setup
-
-If using a remote server, secure the connection instead of exposing port 5432 to the public internet. Options include a VPN like [Tailscale](https://tailscale.com/), an SSH tunnel (`ssh -L 5432:localhost:5432 user@db-server`), or firewall rules restricting access to known IPs.
-
-#### Tailscale Setup (Recommended)
-
-```bash
-sudo tailscale serve --bg --tcp=5432 tcp://127.0.0.1:5432
-```
-
-#### PostgreSQL Configuration
-
-Edit `pg_hba.conf` to allow connections from your Tailscale network:
-
-```
-# Allow Tailscale subnet
-host    all    geode    100.64.0.0/10    md5
-```
-
-## Create User and Database
-
-```sql
-CREATE USER geode WITH PASSWORD 'your_secure_password';
-CREATE DATABASE geode OWNER geode;
-```
-
-## Load Schema
-
-Use the clean schema file provided in `database/schema.sql`:
-
-```bash
-psql -U geode -d geode -f database/schema.sql
-```
-
-## Load Seed Data
-
-Populate reference tables with initial data:
-
-```bash
-psql -U geode -d geode -f database/seed.sql
-```
-
-The seed data includes:
-
-| Table | Description | Source |
-|-------|-------------|--------|
-| `keys` | Key names used in GeoDE | `csv/keys.csv` |
-| `rinex_tank_struct` | RINEX archive structure | `csv/rinex_tank_struct.csv` |
-| `antennas` | IGS antenna codes | `csv/antennas.csv` |
-| `receivers` | IGS receiver codes | `csv/receivers.csv` |
-| `gamit_htc` | Antenna height/offset codes | `csv/gamit_htc.csv` |
-
-## Complete Setup Order
-
-1. **Load schema** (creates core GNSS tables):
-    ```bash
-    psql -U geode -d geode -f database/schema.sql
-    ```
-
-2. **Load seed data** (populates reference tables):
-    ```bash
-    psql -U geode -d geode -f database/seed.sql
-    ```
-
-3. **Start the web interface** (migrations run automatically):
-    ```bash
-    docker compose up -d
-    ```
-    Django migrations run automatically on container startup, adding web UI tables and `api_id` columns.
-
-4. **Login** at `http://localhost:${APP_PORT}` with `admin/admin`
-
-## Recommended RINEX Archive Structure
-
-The `rinex_tank_struct` table defines how RINEX files are organized. The recommended structure is:
-
-| Level | KeyCode |
-|-------|---------|
-| 1 | network |
-| 2 | year |
-| 3 | doy |
-
-This organizes files as: `archive/network/year/doy/`
-
-## Troubleshooting
-
-### Permission Issues
-
-Ensure the `geode` user has appropriate permissions:
-
-```sql
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO geode;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO geode;
-```
-
-### Connection Issues
-
-1. Check PostgreSQL is listening on the correct interface
-2. Verify `pg_hba.conf` allows your connection
-3. Test with: `psql -h hostname -U geode -d geode`
-
-## Processing diagnostics update
-
-This fork adds `ppp_antenna_residuals` and indexes on `events("EventDate")` and
-`stacks(name)`. Fresh SQL installs include them in `database/schema.sql`;
-Django migration `0034_processing_diagnostics` adds them to web deployments.
-The CLI connection's existing migration routine also creates them when needed.
-The operations tolerate an existing installation from either path.
-
-PPP runs store 91 elevation bins (0–90 degrees) when a residual file is available.
-They prefer backward-substitution observations and fall back to forward results.
-Deleting a PPP solution also deletes its residual row. `LocateRinex` can export
-these diagnostics; no residual row is required for older solutions.
-
-The upstream antenna/radome primary-key redesign, project tables, and
-reference-frame management tables are not part of this update. Existing Django
-models, psycopg3 access, and `.env` database configuration remain authoritative.
+PostgreSQL 18's official image stores its volume at `/var/lib/postgresql`.
+A PostgreSQL 16 data directory cannot be reused directly with 18: use a logical
+dump and restore into a fresh volume. See the
+[official image documentation](https://hub.docker.com/_/postgres) and the
+[backup procedure](../development/operations.md).

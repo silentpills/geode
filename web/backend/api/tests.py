@@ -1,3 +1,5 @@
+from unittest.mock import patch
+from django.test import override_settings
 import functools
 from django.test import TestCase
 from . import models
@@ -17,7 +19,30 @@ from . import models
 import django.contrib.auth.hashers
 from django.test import Client
 
-class PermissionsTest(TestCase):
+class CatalogTestCase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.enterClassContext(patch('api.serializers.Nominatim.reverse', return_value=None))
+        cls.enterClassContext(override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}))
+
+    @classmethod
+    def setUpTestData(cls):
+        # Login fixtures belong in tests, never in installation migrations.
+        for name, role_api, allow_all in (
+            ('admin', False, True),
+            ('underprivileged_front', False, False),
+            ('underprivileged_api', True, False),
+        ):
+            role = models.Role.objects.create(name=name, role_api=role_api, allow_all=allow_all)
+            if not allow_all:
+                role.endpoints_clusters.add(models.EndPointsCluster.objects.get(
+                    resource__name='stations', cluster_type__name='read', role_type='FRONT AND API'
+                ))
+            models.User.objects.create_user(username=name, password=name, role=role)
+
+
+class PermissionsTest(CatalogTestCase):
     def authenticate_admin(self):
         url = reverse("token_obtain_pair")
 
@@ -77,7 +102,7 @@ class PermissionsTest(TestCase):
             "antenna_description": "test description"
         })
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
     def test_disabled_role(self):
         self.authenticate_underprivileged_api()
@@ -221,10 +246,11 @@ class PermissionsTest(TestCase):
 
         response = self.client.get(url)
 
-        self.assertEqual(response.status_code, 403)
+        # Registered catalog identities are readable by authenticated API users.
+        self.assertEqual(response.status_code, 200)
 
 
-class StationGapsTest(TestCase):
+class StationGapsTest(CatalogTestCase):
     """
     Test gaps validation when retrieving stations
     """
@@ -255,9 +281,12 @@ class StationGapsTest(TestCase):
             }
             response = self.client.post(url, data)
 
-            self.assertEqual(models.Antennas.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(models.Antennas.objects.filter(antenna_code="ANT1").count(), 1)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["antenna_code"], 'ANT1')
+            for radome in ('R1', 'R2'):
+                models.AntennaRadomes.objects.get_or_create(antenna_code='ANT1', radome_code=radome)
+
 
         def test_create_receivers():
             url = reverse("receivers_list")
@@ -268,8 +297,8 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(models.Receivers.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(models.Receivers.objects.filter(receiver_code="RC1").count(), 1)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["receiver_code"], 'RC1')
 
         def test_create_networks():
@@ -284,7 +313,7 @@ class StationGapsTest(TestCase):
                 url, data)
 
             self.assertEqual(models.Networks.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["network_code"], 'NT1')
 
         def test_create_gamit_htc():
@@ -292,14 +321,15 @@ class StationGapsTest(TestCase):
 
             data = {
                 "antenna_code": 'ANT1',
-                "height_code": 'HT1'
+                "height_code": 'HT1',
+                "h_offset": 0, "v_offset": 0
             }
 
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(models.GamitHtc.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(models.GamitHtc.objects.filter(antenna_code="ANT1", height_code="HT1").count(), 1)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["height_code"], 'HT1')
 
         def test_create_station():
@@ -308,29 +338,22 @@ class StationGapsTest(TestCase):
             data = {
                 "network_code": 'NT1',
                 "station_code": 'ST1',
-                "station_name": 'test station'
+                "station_name": 'test station',
+                "lat": -31.0, "lon": -64.0, "height": 100.0
             }
 
             response = self.client.post(
                 url, data)
 
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(models.Stations.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
             self.assertEqual(response.json()["station_code"], 'ST1')
 
             return response.json()["api_id"]
 
         def test_create_stationmeta(station_api_id):
-            url = reverse("station_meta_list")
-
-            data = {
-                "station": station_api_id,
-            }
-
-            response = self.client.post(
-                url, data)
-
-            self.assertEqual(response.status_code, 201)
+            # The migration-installed station trigger creates metadata automatically.
+            self.assertEqual(models.StationMeta.objects.filter(station_id=station_api_id).count(), 1)
 
         def test_create_first_stationinfo():
 
@@ -351,7 +374,7 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
 
         def test_create_second_stationinfo():
 
@@ -373,13 +396,13 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
 
             self.assertEqual(models.Stationinfo.objects.count(), 2)
             self.assertEqual(response.json()["network_code"], 'NT1')
 
         def update_has_gaps_status():
-            StationMetaUtils.update_has_gaps_status()
+            StationMetaUtils.update_gaps_status_for_all_station_meta_needed()
 
         def test_station_doesnt_have_gaps():
             url = reverse("station_list")
@@ -412,7 +435,7 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
 
             data = {
                 "network_code": 'NT1',
@@ -431,7 +454,7 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
 
             # get rinex
             url = reverse("rinex_list")
@@ -511,7 +534,7 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
 
         def test_create_rinex_after_stationinfo_date():
             url = reverse("rinex_list")
@@ -533,7 +556,7 @@ class StationGapsTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
 
         test_create_antennas()
         test_create_receivers()
@@ -561,7 +584,7 @@ class StationGapsTest(TestCase):
         test_station_has_gaps(1)
 
 
-class StationInfoTest(TestCase):
+class StationInfoTest(CatalogTestCase):
     """
     Test validation for creating and updating station info records
     """
@@ -591,9 +614,12 @@ class StationInfoTest(TestCase):
             }
             response = self.client.post(url, data)
 
-            self.assertEqual(models.Antennas.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(models.Antennas.objects.filter(antenna_code="ANT1").count(), 1)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["antenna_code"], 'ANT1')
+            for radome in ('R1', 'R2'):
+                models.AntennaRadomes.objects.get_or_create(antenna_code='ANT1', radome_code=radome)
+
 
         def test_create_receivers(self):
             url = reverse("receivers_list")
@@ -604,8 +630,8 @@ class StationInfoTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(models.Receivers.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(models.Receivers.objects.filter(receiver_code="RC1").count(), 1)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["receiver_code"], 'RC1')
 
         def test_create_networks(self):
@@ -620,7 +646,7 @@ class StationInfoTest(TestCase):
                 url, data)
 
             self.assertEqual(models.Networks.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["network_code"], 'NT1')
 
         def test_create_gamit_htc(self):
@@ -628,14 +654,15 @@ class StationInfoTest(TestCase):
 
             data = {
                 "antenna_code": 'ANT1',
-                "height_code": 'HT1'
+                "height_code": 'HT1',
+                "h_offset": 0, "v_offset": 0
             }
 
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(models.GamitHtc.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(models.GamitHtc.objects.filter(antenna_code="ANT1", height_code="HT1").count(), 1)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(response.json()["height_code"], 'HT1')
 
         def test_create_station(self):
@@ -644,14 +671,15 @@ class StationInfoTest(TestCase):
             data = {
                 "network_code": 'NT1',
                 "station_code": 'ST1',
-                "station_name": 'test station'
+                "station_name": 'test station',
+                "lat": -31.0, "lon": -64.0, "height": 100.0
             }
 
             response = self.client.post(
                 url, data)
         
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(models.Stations.objects.count(), 1)
-            self.assertEqual(response.status_code, 201)
             self.assertEqual(response.json()["station_code"], 'ST1')
 
         def test_create_station_info(self):
@@ -671,7 +699,7 @@ class StationInfoTest(TestCase):
             response = self.client.post(
                 url, data)
 
-            self.assertEqual(response.status_code, 201)
+            self.assertEqual(response.status_code, 201, response.content)
             self.assertEqual(models.Stationinfo.objects.count(), 1)
             self.assertEqual(response.json()["network_code"], 'NT1')
 
@@ -705,7 +733,7 @@ class StationInfoTest(TestCase):
         response = self.client.post(
             url, data)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
         # there should be only one station info yet
         self.assertEqual(models.Stationinfo.objects.count(), 1)
@@ -738,7 +766,7 @@ class StationInfoTest(TestCase):
         response = self.client.post(
             url, data)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
         self.assertEqual(models.Stationinfo.objects.count(), 2)
 
@@ -774,7 +802,7 @@ class StationInfoTest(TestCase):
         response = self.client.post(
             url, data)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
         self.assertEqual(models.Stationinfo.objects.count(), 2)
 
@@ -808,7 +836,7 @@ class StationInfoTest(TestCase):
         response = self.client.post(
             url, data)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
         self.assertEqual(models.Stationinfo.objects.count(), 2)
 
@@ -879,7 +907,7 @@ class StationInfoTest(TestCase):
         response = self.client.post(
             url, data)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
         self.assertEqual(models.Stationinfo.objects.count(), 2)
 
@@ -937,7 +965,7 @@ class StationInfoTest(TestCase):
         response = self.client.post(
             url, data)
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
 
         self.assertEqual(models.Stationinfo.objects.count(), 2)
 

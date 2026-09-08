@@ -5,8 +5,9 @@ from django.conf import settings
 import psycopg
 
 def connect_to_db():
-    conn = psycopg.connect(
-        f'dbname={settings.DATABASES["default"]["NAME"]} user={settings.DATABASES["default"]["USER"]} password={settings.DATABASES["default"]["PASSWORD"]} host={settings.DATABASES["default"]["HOST"]} port={settings.DATABASES["default"]["PORT"]}')
+    db = settings.DATABASES["default"]
+    conn = psycopg.connect(dbname=db["NAME"], user=db["USER"],
+                           password=db["PASSWORD"], host=db["HOST"], port=db["PORT"])
 
     cur = conn.cursor()
 

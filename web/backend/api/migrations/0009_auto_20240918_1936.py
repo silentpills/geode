@@ -7,8 +7,9 @@ import psycopg
 
 
 def connect_to_db():
-    conn = psycopg.connect(
-        f'dbname={settings.DATABASES["default"]["NAME"]} user={settings.DATABASES["default"]["USER"]} password={settings.DATABASES["default"]["PASSWORD"]} host={settings.DATABASES["default"]["HOST"]} port={settings.DATABASES["default"]["PORT"]}')
+    db = settings.DATABASES["default"]
+    conn = psycopg.connect(dbname=db["NAME"], user=db["USER"],
+                           password=db["PASSWORD"], host=db["HOST"], port=db["PORT"])
 
     cur = conn.cursor()
 
@@ -25,8 +26,9 @@ def set_has_gaps_update_needed_to_true(apps, schema_editor):
         print("Executing: ", query)
         cur.execute(query)
     except Exception as e:
-        print(f"Exception ocurred: {e}. Continuing...")
+        print(f"Required migration SQL failed: {e}")
         conn.rollback()
+        raise
     else:
         conn.commit()
     finally:
