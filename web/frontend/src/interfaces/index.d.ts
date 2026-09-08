@@ -794,6 +794,18 @@ export interface AntennaData {
     antenna_description: string | null;
 }
 
+export interface AntennaRadomeData {
+    api_id: number;
+    antenna_code: string;
+    radome_code: string;
+}
+
+export interface AntennaRadomeServiceData {
+    count: number;
+    total_count: number;
+    data: AntennaRadomeData[];
+}
+
 export interface GamitHTCData {
     antenna_code: string;
     api_id: number;

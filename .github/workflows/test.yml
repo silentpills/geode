@@ -69,6 +69,9 @@ jobs:
       - name: Run tests
         run: pixi run test
 
+      - name: Test antenna catalog API and migrations
+        run: pixi run -e web test geode/tests/test_antenna_api.py
+
       - name: Test optional report exports
         run: pixi run -e reports test geode/tests/test_reports.py
 

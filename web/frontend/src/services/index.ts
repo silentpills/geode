@@ -1293,11 +1293,21 @@ export async function getStationEventByIdService<T>(
 // Antennas
 export async function getAntennasService<T>(api: AxiosInstance): Promise<T> {
     try {
-        const response = await api.get(`api/antennas`);
+        const response = await api.get(`api/antennas`, { params: { limit: 0, offset: 0 } });
         return response.data as Promise<T>;
     } catch (error) {
         return Promise.reject(error);
     }
+}
+
+export async function getAntennaRadomesService<T>(
+    api: AxiosInstance,
+    antennaCode: string,
+): Promise<T> {
+    const response = await api.get("api/antenna-radomes", {
+        params: { antenna_code: antennaCode, limit: 0, offset: 0 },
+    });
+    return response.data as T;
 }
 
 export async function getAntennaService<T>(

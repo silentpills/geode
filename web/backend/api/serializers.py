@@ -233,27 +233,46 @@ class EndpointsClusterSerializer(serializers.ModelSerializer):
 
 
 class StationinfoSerializer(serializers.ModelSerializer):
+    # Preserve legacy blank values on existing records, but require explicit
+    # radomes for new equipment histories.
+    radome_code = serializers.CharField(max_length=7, allow_blank=True)
+
     class Meta:
         model = models.Stationinfo
         fields = '__all__'
 
     def validate(self, data):
         """
-            Check that antenna_code and height_code exist in 'gamit_htc' table,
-            since Django doesn't support composite foreign keys.
-            Also check date_end is greater than date_start
+            Validate the antenna/radome catalog, model-specific height code,
+            and dates using both submitted fields and the existing record.
         """
-        try:
-            models.GamitHtc.objects.get(
-                antenna_code=data['antenna_code'], height_code=data['height_code'])
-        except models.GamitHtc.DoesNotExist:
-            raise serializers.ValidationError(
-                'The combination of antenna_code and height_code does not exist in the gamit_htc table')
-
-        if 'date_start' in data and 'date_end' in data and isinstance(data['date_start'], datetime.datetime) and isinstance(data['date_end'], datetime.datetime):
-            if data['date_start'] > data['date_end']:
-                raise serializers.ValidationError(
-                    'date_end must be greater or equal than date_start')
+        effective = {
+            name: data.get(name, getattr(self.instance, name, None))
+            for name in ('antenna_code', 'radome_code', 'height_code', 'date_start', 'date_end')
+        }
+        for name in ('date_start', 'date_end'):
+            if isinstance(effective[name], datetime.datetime):
+                effective[name] = effective[name].replace(tzinfo=None)
+        unchanged_pair = self.instance is not None and all(
+            effective[name] == getattr(self.instance, name)
+            for name in ('antenna_code', 'radome_code')
+        )
+        if not effective['radome_code'] and not unchanged_pair:
+            raise serializers.ValidationError({'radome_code': 'Specify a radome code; NONE means no radome.'})
+        if not models.AntennaRadomes.objects.filter(
+            antenna_code=effective['antenna_code'], radome_code=effective['radome_code']
+        ).exists():
+            raise serializers.ValidationError({
+                'radome_code': 'This antenna/radome combination is not registered. Register the verified combination in the antenna catalog first.'
+            })
+        if not models.GamitHtc.objects.filter(
+            antenna_code=effective['antenna_code'], height_code=effective['height_code']
+        ).exists():
+            raise serializers.ValidationError({
+                'height_code': 'This antenna/height-code combination does not exist in gamit_htc.'
+            })
+        if effective['date_start'] and effective['date_end'] and effective['date_start'] > effective['date_end']:
+            raise serializers.ValidationError('date_end must be greater or equal than date_start')
 
         if 'date_start' in data and isinstance(data['date_start'], datetime.datetime):
             if data['date_start'] >= datetime.datetime(9999, 12, 31):
@@ -873,6 +892,29 @@ class AntennaSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Antennas
         fields = '__all__'
+
+
+class AntennaRadomeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.AntennaRadomes
+        fields = '__all__'
+
+    def validate_antenna_code(self, value):
+        from geode.metadata.antenna_catalog import normalize_pair
+        try:
+            value = normalize_pair(value, 'NONE')[0]
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+        if not models.Antennas.objects.filter(antenna_code=value).exists():
+            raise serializers.ValidationError('Register the antenna model first.')
+        return value
+
+    def validate_radome_code(self, value):
+        from geode.metadata.antenna_catalog import normalize_pair
+        try:
+            return normalize_pair('MODEL', value)[1]
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
 
 
 class AprCoordsSerializer(serializers.ModelSerializer):

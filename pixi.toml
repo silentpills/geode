@@ -71,6 +71,7 @@ default = { features = ["dev"], solve-group = "default" }
 # Docs environment for building documentation
 docs = { features = ["docs"], solve-group = "default" }
 reports = { features = ["dev", "reports"], solve-group = "default" }
+web = { features = ["dev", "web"], solve-group = "default" }
 
 [feature.docs.pypi-dependencies]
 mkdocs = "*"
@@ -80,6 +81,7 @@ pymdown-extensions = "*"
 [tasks]
 # Testing
 test = { cmd = "pytest" }
+"test:api" = { cmd = "pytest geode/tests/test_antenna_api.py" }
 "test:verbose" = { cmd = "pytest -v" }
 "test:cov" = { cmd = "pytest --cov=geode --cov-report=term-missing" }
 
@@ -106,3 +108,17 @@ check = { cmd = "ruff check geode com && ruff format --check geode com && ty che
 # check-external = "which gfzrnx && which crx2rnx && which gpspace && which sh_gamit"
 # pgamit = "pgamit --help"
 # plot = "PlotETM.py <sitecode>"
+
+# Backend/API tests use the same Django and DRF series as the backend image.
+[feature.web.pypi-dependencies]
+django = "~=5.2.11"
+djangorestframework = "~=3.15.2"
+djangorestframework-simplejwt = "~=5.5.1"
+django-auditlog = "==3.0.0"
+django-filter = "==24.2"
+django-cors-headers = "==4.3.1"
+django-cleanup = "==8.1.0"
+drf-spectacular = "==0.28.0"
+drf-standardized-errors = "==0.13.0"
+celery = "~=5.5.0"
+redis = "~=5.2.0"

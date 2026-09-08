@@ -14,6 +14,8 @@ import "react-datepicker/dist/react-datepicker.css";
 
 import {
     AntennaData,
+    AntennaRadomeData,
+    AntennaRadomeServiceData,
     AntennaServiceData,
     ErrorResponse,
     Errors,
@@ -29,6 +31,7 @@ import {
 import {
     delStationInfoService,
     getAntennasService,
+    getAntennaRadomesService,
     getHeightCodesService,
     getReceiversService,
     postStationInfoService,
@@ -95,6 +98,26 @@ const EditStatsModal = ({
 
     const [antennas, setAntennas] = useState<AntennaData[]>([]);
     const [matchingAntennas, setMatchingAntennas] = useState<AntennaData[]>([]);
+
+    const [radomes, setRadomes] = useState<AntennaRadomeData[]>([]);
+    const [radomesLoading, setRadomesLoading] = useState(false);
+    const [radomesError, setRadomesError] = useState("");
+
+    useEffect(() => {
+        let active = true;
+        setRadomes([]);
+        setRadomesError("");
+        if (!formState.antenna_code) {
+            setRadomesLoading(false);
+            return;
+        }
+        setRadomesLoading(true);
+        getAntennaRadomesService<AntennaRadomeServiceData>(api, formState.antenna_code)
+            .then((result) => { if (active) setRadomes(result.data); })
+            .catch(() => { if (active) setRadomesError("Could not load registered radomes. Reopen this form to retry."); })
+            .finally(() => { if (active) setRadomesLoading(false); });
+        return () => { active = false; };
+    }, [formState.antenna_code]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const [heightcodes, setHeightcodes] = useState<GamitHTCData[]>([]);
     const [matchingHeightcodes, setMatchingHeightcodes] = useState<
@@ -487,7 +510,30 @@ const EditStatsModal = ({
                                                     .replace("_", " ")}
                                             </span>
                                         </div>
-                                        <input
+                                        {key === "radome_code" ? (
+                                            <select
+                                                aria-label="Radome code"
+                                                className="grow bg-transparent"
+                                                value={formState.radome_code ?? ""}
+                                                disabled={radomesLoading || !formState.antenna_code || !!radomesError}
+                                                onChange={(event) => dispatch({
+                                                    type: "change_value",
+                                                    payload: { inputName: key, inputValue: event.target.value },
+                                                })}
+                                            >
+                                                <option value="">{radomesLoading ? "Loading radomes…" : "Select a registered radome"}</option>
+                                                {formState.radome_code && !radomes.some((pair) => pair.radome_code === formState.radome_code) && (
+                                                    <option value={formState.radome_code} disabled>
+                                                        {formState.radome_code} (not registered for this antenna)
+                                                    </option>
+                                                )}
+                                                {radomes.filter((pair) => pair.radome_code).map((pair) => (
+                                                    <option key={pair.api_id} value={pair.radome_code}>
+                                                        {pair.radome_code === "NONE" ? "NONE — no radome" : pair.radome_code}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        ) : <input
                                             type={
                                                 key in inputsToDatePicker
                                                     ? "datetime-local"
@@ -588,7 +634,7 @@ const EditStatsModal = ({
                                                     ? "YYYY DDD HH MM SS"
                                                     : ""
                                             }
-                                        />
+                                        />}
                                         {inputsToDatePicker.includes(key) &&
                                             !doyCheck?.[key].check && (
                                                 <>
@@ -647,6 +693,13 @@ const EditStatsModal = ({
                                         </div>
                                     )}
                                 </div>
+                                {key === "radome_code" && (
+                                    <p className="text-sm mt-1" role={radomesError ? "alert" : undefined}>
+                                        {radomesError || (!radomesLoading && formState.antenna_code && !radomes.length
+                                            ? "No combinations registered for this antenna. Ask a catalog administrator to register the verified combination."
+                                            : "Choose the installed radome. NONE means no radome; registration does not confirm calibration availability.")}
+                                    </p>
+                                )}
                                 {showMenu?.show &&
                                 showMenu.type === key &&
                                 key === "receiver_code" ? (

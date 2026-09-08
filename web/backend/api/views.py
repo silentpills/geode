@@ -265,6 +265,26 @@ class AntennaDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = serializers.AntennaSerializer
 
 
+class AntennaRadomeList(CustomListCreateAPIView):
+    queryset = models.AntennaRadomes.objects.all()
+    serializer_class = serializers.AntennaRadomeSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['antenna_code', 'radome_code']
+
+
+class AntennaRadomeDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = models.AntennaRadomes.objects.all()
+    serializer_class = serializers.AntennaRadomeSerializer
+
+    def perform_destroy(self, instance):
+        if models.Stationinfo.objects.filter(
+            antenna_code=instance.antenna_code, radome_code=instance.radome_code
+        ).exists():
+            raise rest_framework.exceptions.ValidationError(
+                'This combination is used by station history and cannot be deleted.')
+        super().perform_destroy(instance)
+
+
 class StationList(CustomListCreateAPIView):
     queryset = models.Stations.objects.select_related('network_code').all()
     serializer_class = serializers.StationSerializer

@@ -1275,6 +1275,7 @@ class VisitGNSSDataFiles(BaseModel):
 
 def enable_automatic_auditlog():
     auditlog.register(Antennas)
+    auditlog.register(AntennaRadomes)
     auditlog.register(Networks)
     auditlog.register(Person)
     auditlog.register(Receivers)

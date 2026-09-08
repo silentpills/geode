@@ -8,6 +8,8 @@ from . import views
 from django.conf import settings
 
 urlpatterns = [
+    path('antenna-radomes', views.AntennaRadomeList.as_view(), name='antenna_radomes_list'),
+    path('antenna-radomes/<int:pk>', views.AntennaRadomeDetail.as_view(), name='antenna_radome_detail'),
     path('antennas', views.AntennaList.as_view(), name='antennas_list'),
     path('antennas/<int:pk>', views.AntennaDetail.as_view(), name='antenna_detail'),
     path('apr-coords', views.AprCoordsList.as_view(), name='apr_coords_list'),
