@@ -30,10 +30,13 @@ list the original upstream commits as absent even where their code was ported.
 - Relaxation defaults remain `[0.05, 1]`, with earthquake and jump spacing both
   at 3 days. Upstream's changed scientific defaults are not adopted implicitly.
 - Quoted command arguments and argument lists remain supported.
-- The antenna/radome primary-key redesign, antenna-calibration import, GAMIT
-  project/reference-frame management tables, and LLM-assisted metadata planning
-  are deferred as a separate coordinated database/web feature. The new reporting
-  tools do not require those schema changes.
+- Antenna/radome identity is implemented with a separate combination catalog,
+  preserving the model table, API IDs, and height conversions. CLI imports,
+  station editing, and the web API enforce the pair. See the
+  [antenna catalog guide](../usage/antenna-catalog.md).
+- Database calibration-value import and selection, GAMIT project/reference-frame
+  management tables, and LLM-assisted metadata planning remain deferred. The
+  reporting tools do not require those features.
 
 ## Validation
 
@@ -44,6 +47,7 @@ pixi run lint
 pixi run format:check
 pixi run test
 pixi run -e reports test geode/tests/test_reports.py
+pixi run -e web test:api
 pixi run -e docs docs:build
 ```
 

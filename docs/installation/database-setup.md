@@ -4,6 +4,10 @@ GeoDE relies heavily on a PostgreSQL database. The CLI tools and web interface b
 
 Ideally, use two systems: one for the PostgreSQL database engine and another for running GeoDE. While running both on the same computer is possible, it's not recommended for high-efficiency processing.
 
+Before importing station equipment history into a new database, populate the
+[antenna/radome catalog](../usage/antenna-catalog.md). Loading the antenna-model
+CSV alone does not register antenna/radome combinations.
+
 ## Install PostgreSQL
 
 On your database server (can be remote or local):

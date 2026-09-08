@@ -25,6 +25,15 @@ A file with station list can also be provided (using same conventions). In files
 
 ---
 
+## AntennaCatalog.py
+
+Register antenna/radome combinations explicitly or import their identities from
+ANTEX 1.4. Run `pixi run AntennaCatalog.py --help` and see the
+[antenna catalog guide](antenna-catalog.md) for setup, previews, and examples.
+Registration does not import calibration values.
+
+---
+
 ## ArchiveService.py
 
 Archive operations service.

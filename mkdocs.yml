@@ -21,6 +21,7 @@ nav:
     - CLI Tools: installation/cli-tools.md
   - Usage:
     - CLI Reference: usage/cli-reference.md
+    - Antenna Catalog: usage/antenna-catalog.md
     - Reports and Campaigns: usage/reports-and-campaigns.md
     - Web Interface: usage/web-interface.md
   - Reference:

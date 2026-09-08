@@ -205,6 +205,8 @@ Pixi supports multiple environments:
 
 - **default**: Main environment with dev dependencies (type stubs, ty, pre-commit)
 - **docs**: Documentation building environment with mkdocs
+- **reports**: PDF and map export dependencies
+- **web**: Django/DRF backend testing (`pixi run -e web test:api`)
 
 Switch environments:
 
