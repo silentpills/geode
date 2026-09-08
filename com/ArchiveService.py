@@ -50,7 +50,7 @@ from geode import (
     pyRinex,
     pyRinexName,
 )
-from geode.metadata.station_info import StationInfoException
+from geode.metadata import station_info
 
 # app
 from geode.Utils import (
@@ -65,6 +65,7 @@ from geode.Utils import (
 
 repository_data_in = ""
 cnn = dbConnection.Cnn("gnss_data.cfg")
+station_import_counts = {}  # net.stnm -> count of files imported this run
 
 
 def insert_station_w_lock(cnn, StationCode, filename, lat, lon, h, x, y, z, otl):
@@ -187,6 +188,7 @@ def insert_station_w_lock(cnn, StationCode, filename, lat, lon, h, x, y, z, otl)
 def callback_handle(job):
     global cnn
     global repository_data_in
+    global station_import_counts
 
     def log_job_error(msg):
         tqdm.write(
@@ -209,6 +211,12 @@ def callback_handle(job):
     if job.result is not None:
         out_message = job.result[0]
         new_station = job.result[1]
+        imported_station = job.result[2] if len(job.result) > 2 else None
+
+        if imported_station:
+            station_import_counts[imported_station] = (
+                station_import_counts.get(imported_station, 0) + 1
+            )
 
         if out_message:
             log_job_error(out_message)
@@ -333,6 +341,8 @@ def insert_data(cnn, archive, rinexinfo):
 
         cnn.insert_event(event)
 
+    return inserted
+
 
 def verify_rinex_multiday(cnn, rinexinfo, Config):
     # function to verify if rinex is multiday
@@ -378,6 +388,9 @@ def verify_rinex_multiday(cnn, rinexinfo, Config):
 
 
 def process_crinex_file(crinez, filename, data_rejected, data_retry):
+
+    imported_station = None  # set to 'net.stnm' if a new record is inserted
+
     # create a uuid temporary folder in case we cannot read
     #  the year and doy from the file (and gets rejected)
     reject_folder = os.path.join(data_rejected, str(uuid.uuid4()))
@@ -394,6 +407,7 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
             traceback.format_exc()
             + " while opening the database to process file %s node %s"
             % (crinez, platform.node()),
+            None,
             None,
         )
 
@@ -414,7 +428,7 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
         )
         error_handle(cnn, event, crinez, reject_folder, filename, no_db_log=True)
         cnn.close()
-        return event["Description"], None
+        return event["Description"], None, None
 
     def fill_event(ev, desc=None):
         if desc:
@@ -438,7 +452,7 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
                 # was a multiday rinex. verify_rinex_date_multiday
                 #  took care of it
                 cnn.close()
-                return None, None
+                return None, None, None
 
             # DDG: we don't use otl coefficients because
             #  we need an approximated coordinate
@@ -539,7 +553,11 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
                 if result:
                     # insert: there is only 1 match with the same StationCode.
                     rinexinfo.rename(NetworkCode=match[0]["NetworkCode"])
-                    insert_data(cnn, archive, rinexinfo)
+                    if insert_data(cnn, archive, rinexinfo):
+                        imported_station = "%s.%s" % (
+                            rinexinfo.NetworkCode,
+                            rinexinfo.StationCode,
+                        )
 
                 elif len(match) == 1:
                     error = (
@@ -646,13 +664,17 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
                         filename=os.path.relpath(crinez, Config.repository_data_in),
                     )
                     cnn.close()
-                    return None, [
-                        StationCode,
-                        (ppp.x, ppp.y, ppp.z),
-                        coeff,
-                        (ppp.lat[0], ppp.lon[0], ppp.h[0]),
-                        crinez,
-                    ]
+                    return (
+                        None,
+                        [
+                            StationCode,
+                            (ppp.x, ppp.y, ppp.z),
+                            coeff,
+                            (ppp.lat[0], ppp.lon[0], ppp.h[0]),
+                            crinez,
+                        ],
+                        None,
+                    )
 
     except (
         pyRinex.pyRinexExceptionBadFile,
@@ -699,7 +721,7 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
         fill_event(e.event)
         error_handle(cnn, e.event, crinez, reject_folder, filename)
 
-    except StationInfoException as e:
+    except station_info.StationInfoException as e:
         retry_folder = retry_folder.replace("%reason%", "station_info_exception")
 
         fill_event(
@@ -779,10 +801,10 @@ def process_crinex_file(crinez, filename, data_rejected, data_retry):
         error_handle(cnn, event, crinez, retry_folder, filename, no_db_log=True)
         cnn.close()
 
-        return event["Description"], None
+        return event["Description"], None, None
 
     cnn.close()
-    return None, None
+    return None, None, imported_station
 
 
 def remove_empty_folders(folder):
@@ -801,6 +823,7 @@ def remove_empty_folders(folder):
 
 def print_archive_service_summary():
     global cnn
+    global station_import_counts
 
     # find the last event in the executions table
     exec_date = cnn.query_float(
@@ -830,6 +853,18 @@ def print_archive_service_summary():
     print(" -- info    : %i" % info[0][0])
     print(" -- errors  : %i" % erro[0][0])
     print(" -- warnings: %i" % warn[0][0])
+
+    if station_import_counts:
+        total = sum(station_import_counts.values())
+        print("\n >> Files imported per station (%i total):" % total)
+        print(" -- %-24s %s" % ("Station", "Files"))
+        print(" -- " + "-" * 32)
+        for stn, count in sorted(
+            station_import_counts.items(), key=lambda x: (-x[1], x[0])
+        ):
+            print(" -- %-24s %i" % (stn, count))
+    else:
+        print("\n >> No files were imported in this run.")
 
 
 def process_visit_file(Config, record):
@@ -1206,7 +1241,7 @@ def main():
             "geode.pyRinex",
             "geode.pyArchiveStruct",
             "geode.pyOTL",
-            "geode.pyStationInfo",
+            "geode.metadata.station_info",
             "geode.dbConnection",
             "geode.Utils",
             "geode.pyDate",

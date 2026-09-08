@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 10/25/17 8:53 AM
 Author: Demian D. Gomez
 
@@ -63,7 +63,12 @@ class Event(dict):
         for key in val:
             s = val[key]
             if type(s) is str:
-                s = re.sub(r"[^\x00-\x7f]+", "", s)
+                # Remove NULL bytes and problematic control characters
+                # Keep: tab (\x09), newline (\x0a), carriage return (\x0d)
+                # Keep: all printable ASCII and Unicode (including accented chars)
+                # Old line removed all non-ASCII including accented letters:
+                # s = re.sub(r'[^\x00-\x7f]+', '', s)
+                s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", s)
                 s = s.replace("'", '"')
                 s = re.sub(r"BASH.*", "", s)
                 s = re.sub(r"PSQL.*", "", s)

@@ -639,7 +639,7 @@ def plot_station_info_rinex(cnn, NetworkCode, StationCode, stninfo_records):
                     record["DateStart"].fyear,
                     (
                         record["DateEnd"].fyear
-                        if record["DateEnd"].year is not None
+                        if record["DateEnd"].year not in (None, 9999)
                         else pyDate.Date(datetime=datetime.datetime.now()).fyear
                     ),
                 ]

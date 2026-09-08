@@ -969,7 +969,7 @@ class StationInfo:
         elif (
             len(overlaps) == 1
             and overlaps[0] == self.records[-1]
-            and not self.records[-1].DateEnd.year
+            and self.records[-1].DateEnd.year in (None, 9999)
         ):
             # Overlap with last session
             new_end_date = record.DateStart.datetime() - datetime.timedelta(seconds=1)

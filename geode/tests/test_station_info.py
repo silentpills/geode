@@ -98,7 +98,7 @@ class TestStationInfoRecordParsing:
         assert records[0].DateEnd.doy == 276
 
         # Check last record has open end date
-        assert records[-1].DateEnd.year is None
+        assert records[-1].DateEnd.year == 9999
 
     def test_parse_all_records_with_daz(self):
         """Test parsing all records with AntennaDAZ."""

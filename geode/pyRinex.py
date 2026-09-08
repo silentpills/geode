@@ -1312,7 +1312,7 @@ class ReadRinex(RinexRecord):
         d = int((end - start).total_seconds())
 
         cmd = pyRunWithRetry.RunCommand(
-            "gfzrnx_lx -finp %s -fout %s.t -epo_beg %i%02i%02i_%02i%02i%02i -d %i -kv"
+            "gfzrnx_lx -finp %s -fout %s.t -epo_beg %i%02i%02i_%02i%02i%02i -d %i -f -kv"
             % (
                 self.rinex_path,
                 self.rinex_path,
@@ -1324,7 +1324,7 @@ class ReadRinex(RinexRecord):
                 start.second,
                 d,
             ),
-            45,
+            120,
         )
         try:
             _, err = cmd.run_shell()
@@ -1357,9 +1357,9 @@ class ReadRinex(RinexRecord):
             self.interval = decimate_rate
 
         cmd = pyRunWithRetry.RunCommand(
-            "gfzrnx_lx -finp %s -fout %s.t -smp %i -kv"
+            "gfzrnx_lx -finp %s -fout %s.t -smp %i -f -kv"
             % (copyto, copyto, decimate_rate),
-            45,
+            120,
         )
         try:
             _, err = cmd.run_shell()
@@ -1391,7 +1391,8 @@ class ReadRinex(RinexRecord):
         rsys = "".join(s for s in vsys if s not in systems)
 
         cmd = pyRunWithRetry.RunCommand(
-            "gfzrnx_lx -finp %s -fout %s.t -satsys %s -kv" % (copyto, copyto, rsys), 45
+            "gfzrnx_lx -finp %s -fout %s.t -satsys %s -f -kv" % (copyto, copyto, rsys),
+            120,
         )
 
         try:
@@ -1433,7 +1434,11 @@ class ReadRinex(RinexRecord):
                     + NewValues.date.yyyyddd()
                 )
             else:
-                NewValues = NewValues.currentrecord
+                NewValues = {
+                    k: v
+                    for k, v in vars(NewValues.current_record).items()
+                    if not k.startswith("_")
+                }
 
         # DDG: check if NewValues is None -> assign empty dict in that case
         if NewValues is None:

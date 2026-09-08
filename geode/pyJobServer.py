@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/13/17 6:30 PM
 Author: Demian D. Gomez
 
@@ -10,6 +10,7 @@ before sending jobs to each node
 import _thread
 import os
 import queue
+import threading
 import time
 import traceback
 
@@ -201,11 +202,10 @@ def test_node(
             "sed",
             "compress",
         ):
-            with pyRunWithRetry.command("which " + prg) as run:
-                print(" >> Testing %s" % prg)
-                run.run()
-                if run.stdout == "":
-                    return " -- %s: Could not find path to %s" % (platform.node(), prg)
+            print(" >> Testing %s" % prg)
+            stdout, _ = pyRunWithRetry.RunCommand("which " + prg, 10).run_shell()
+            if not stdout.strip():
+                return " -- %s: Could not find path to %s" % (platform.node(), prg)
         print(" -- Done")
 
         # check grdtab and ppp from the config file
@@ -304,31 +304,47 @@ def setup(modules):
 class JobServer:
     def check_cluster(self, status, node, job):
         if status == dispy.DispyNode.Initialized:
-            print(" -- Checking node %s (%i CPUs)..." % (node.name, node.avail_cpus))
-            # test node to make sure everything works
+            with self._node_init_lock:
+                print(
+                    " -- Checking node %s (%i CPUs)..." % (node.name, node.avail_cpus)
+                )
 
-            self.cluster.send_file("gnss_data.cfg", node)
+                try:
+                    self.cluster.send_file("gnss_data.cfg", node)
+                except Exception as e:
+                    print(" -- %s: Could not send gnss_data.cfg: %s" % (node.name, e))
+                    return
 
-            job = self.cluster.submit_node(
-                node,
-                self.check_gamit_tables,
-                self.check_archive,
-                self.check_atx,
-                self.software_sync,
-            )
+                job = self.cluster.submit_node(
+                    node,
+                    self.check_gamit_tables,
+                    self.check_archive,
+                    self.check_atx,
+                    self.software_sync,
+                )
 
-            self.cluster.wait()
+                if job is None:
+                    print(
+                        " -- %s: submit_node returned None (node may be unavailable)"
+                        % node.name
+                    )
+                    return
 
-            # create a delay to allow propagation of the result
-            # <nah> @todo aca si job es None bug, y no está claro si con el wait() el
-            # delay es realmente necesario / delay arbitrario sin reintentos?
-            start_t = time.time()
-            while job is None and (time.time() - start_t) < self.delay:
-                time.sleep(1)
+                # poll with timeout instead of cluster.wait() to avoid hanging on a dead node
+                deadline = time.monotonic() + 60
+                while job.status not in (
+                    dispy.DispyJob.Finished,
+                    dispy.DispyJob.Cancelled,
+                    dispy.DispyJob.Abandoned,
+                    dispy.DispyJob.Terminated,
+                ):
+                    if time.monotonic() > deadline:
+                        print(" -- %s: test job timed out, skipping node" % node.name)
+                        return
+                    time.sleep(0.5)
 
-            self.result.append(job.result)
-
-            self.nodes.append(node)
+                self.result.append(job.result)
+                self.nodes.append(node)
 
     def __init__(
         self,
@@ -357,6 +373,7 @@ class JobServer:
         self.nodes = []
         self.result = []
         self.jobs = []
+        self._node_init_lock = threading.Lock()
         self.run_parallel = Config.run_parallel and run_parallel
         self.delay = Config.cluster_delay
         self.verbose = False
@@ -419,8 +436,12 @@ class JobServer:
                 os._exit(1)
 
             for r in self.result:
-                if "Test passed!" not in r:
-                    print(r)
+                if r is None or "Test passed!" not in r:
+                    print(
+                        r
+                        if r is not None
+                        else " -- Node returned no result (job crashed on the remote node)"
+                    )
                     print(
                         " >> Errors were encountered during initialization. Check messages."
                     )
@@ -437,8 +458,8 @@ class JobServer:
                 check_executables=check_executables,
                 check_atx=check_atx,
             )
-            if "Test passed!" not in r:
-                print(r)
+            if r is None or "Test passed!" not in r:
+                print(r if r is not None else " -- test_node returned no result")
                 print(
                     " >> Errors were encountered during initialization. Check messages."
                 )
