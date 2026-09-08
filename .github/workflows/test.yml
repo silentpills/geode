@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master, dev]
+    branches: [dev]
   pull_request:
-    branches: [main, master, dev]
+    branches: [dev]
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
       - name: Set up Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
-          pixi-version: latest
+          pixi-version: "0.80.0"
           cache: true
           locked: true
 
@@ -40,7 +40,7 @@ jobs:
       - name: Set up Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
-          pixi-version: latest
+          pixi-version: "0.80.0"
           cache: true
           locked: true
 
@@ -62,15 +62,15 @@ jobs:
       - name: Set up Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
-          pixi-version: latest
+          pixi-version: "0.80.0"
           cache: true
           locked: true
 
       - name: Run tests
         run: pixi run test
 
-      - name: Test antenna catalog API and migrations
-        run: pixi run -e web test geode/tests/test_antenna_api.py
+      - name: Test API, complete migrations, and historical Django suite
+        run: pixi run -e web test:api
 
       - name: Test optional report exports
         run: pixi run -e reports test geode/tests/test_reports.py
@@ -84,7 +84,7 @@ jobs:
       - name: actionlint
         uses: reviewdog/action-actionlint@v1
         with:
-          reporter: github-pr-review
+          reporter: local
           fail_level: error
 
   commit-check:
@@ -102,3 +102,16 @@ jobs:
         uses: webiny/action-conventional-commits@v1.3.1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docs-and-frontend:
+    name: Documentation and frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: "0.80.0"
+          locked: true
+          environments: docs frontend
+      - run: pixi run -e docs docs:build --strict
+      - run: pixi run -e frontend frontend:build

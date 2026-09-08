@@ -2,9 +2,9 @@ name: Security
 
 on:
   push:
-    branches: [main, master, dev]
+    branches: [dev]
   pull_request:
-    branches: [main, master, dev]
+    branches: [dev]
   schedule:
     # Run weekly on Mondays at 00:00 UTC
     - cron: '0 0 * * 1'
@@ -50,14 +50,13 @@ jobs:
       - name: Set up Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
-          pixi-version: latest
+          pixi-version: "0.80.0"
           cache: true
           locked: true
 
-      - name: Run pip-audit on dependencies
+      - name: Audit locked backend and processing PyPI dependencies
         shell: bash
         run: |
-          eval "$(pixi shell-hook)"
-          pip install pip-audit
-          pip-audit --desc -r <(pixi list --json | jq -r '.[] | select(.type == "pypi") | "\(.name)==\(.version)"')
-        continue-on-error: true  # Don't fail the build, just report
+          pixi list -e runtime --json > runtime-packages.json
+          pixi run -e audit python tools/audit_requirements.py < runtime-packages.json > runtime-requirements.txt
+          pixi run -e audit pip-audit --no-deps --disable-pip --desc -r runtime-requirements.txt

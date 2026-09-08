@@ -1,26 +1,20 @@
 version: 2
+# Python updates must also refresh pixi.lock; CI rejects manifest/lock drift.
 updates:
   # Python dependencies (pyproject.toml)
   - package-ecosystem: pip
     directory: "/"
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
     labels: ["dependencies"]
 
-  # Python dependencies (web backend requirements.txt)
-  - package-ecosystem: pip
-    directory: "/web/backend"
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels: ["dependencies", "backend"]
-
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: dev
     schedule:
       interval: weekly
     labels: ["dependencies"]
@@ -28,6 +22,7 @@ updates:
   # npm (frontend)
   - package-ecosystem: npm
     directory: "/web/frontend"
+    target-branch: dev
     schedule:
       interval: weekly
     labels: ["dependencies"]
@@ -35,6 +30,7 @@ updates:
   # Docker (backend)
   - package-ecosystem: docker
     directory: "/web/backend"
+    target-branch: dev
     schedule:
       interval: monthly
     labels: ["dependencies"]
@@ -42,6 +38,7 @@ updates:
   # Docker (frontend)
   - package-ecosystem: docker
     directory: "/web/frontend"
+    target-branch: dev
     schedule:
       interval: monthly
     labels: ["dependencies"]

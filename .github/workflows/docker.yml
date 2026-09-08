@@ -2,33 +2,9 @@ name: Docker
 
 on:
   push:
-    branches: [main, master, dev]
-    paths:
-      - "web/backend/Dockerfile"
-      - "web/backend/requirements.txt"
-      - "geode/**"
-      - "com/**"
-      - "pyproject.toml"
-      - ".dockerignore"
-      - "web/frontend/Dockerfile"
-      - "web/frontend/package.json"
-      - "web/frontend/package-lock.json"
-      - "docker-compose*.yml"
-      - ".hadolint.yaml"
+    branches: [dev]
   pull_request:
-    branches: [main, master, dev]
-    paths:
-      - "web/backend/Dockerfile"
-      - "web/backend/requirements.txt"
-      - "geode/**"
-      - "com/**"
-      - "pyproject.toml"
-      - ".dockerignore"
-      - "web/frontend/Dockerfile"
-      - "web/frontend/package.json"
-      - "web/frontend/package-lock.json"
-      - "docker-compose*.yml"
-      - ".hadolint.yaml"
+    branches: [dev]
 
 permissions:
   contents: read
@@ -62,8 +38,26 @@ jobs:
 
       - name: Build frontend image
         run: docker build -t gnss-frontend ./web/frontend
-        env:
-          VITE_API_URL: http://localhost
+
+
+      - name: Smoke-test fresh deployment and readiness
+        run: |
+          cp .env.example .env
+          mkdir -p var/media
+          chmod 777 var/media
+          docker compose --profile bundled-db up --build -d --wait --wait-timeout 300
+          curl --fail http://localhost:8080/api/health-check
+          curl --fail --head http://localhost:8080/
+          docker compose exec -T frontend nginx -t
+          docker compose exec -T backend python manage.py migrate --check
+          docker compose exec -T backend python manage.py makemigrations --check --dry-run
+          docker compose exec -T backend python manage.py shell -c 'from api.models import User; assert not User.objects.exists()'
+      - name: Show deployment logs
+        if: always()
+        run: docker compose --profile bundled-db logs --no-color
+      - name: Stop smoke-test services
+        if: always()
+        run: docker compose --profile bundled-db down --volumes
 
   trivy:
     name: Container Security Scan
@@ -86,8 +80,7 @@ jobs:
 
       - name: Build frontend image
         run: docker build -t gnss-frontend ./web/frontend
-        env:
-          VITE_API_URL: http://localhost
+
 
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@0.33.1
