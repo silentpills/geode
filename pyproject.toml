@@ -60,6 +60,7 @@ dependencies = [
 ]
 
 [project.scripts]
+"AntennaCatalog.py" = "com.AntennaCatalog:main"
 "PlotETM.py" = "com.PlotETM:main"
 "AlterETM.py" = "com.AlterETM:main"
 "EtmStacker.py" = "com.EtmStacker:main"

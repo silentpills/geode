@@ -878,6 +878,20 @@ class StationInfo:
         self.cnn.delete("stationinfo", **record.to_database_dict())
         self._load_records()
 
+    def validate_antenna_radome(self, record: StationInfoRecord) -> None:
+        """Fail before any history edits when an equipment pair is unregistered."""
+        self.cnn.cursor.execute(
+            'SELECT 1 FROM antenna_radomes WHERE "AntennaCode" = %s AND "RadomeCode" = %s',
+            (record.AntennaCode, record.RadomeCode),
+        )
+        if self.cnn.cursor.fetchone() is None:
+            raise StationInfoException(
+                f"Unregistered antenna/radome combination: {record.AntennaCode!r} / "
+                f"{record.RadomeCode!r}. Register the verified combination with "
+                "AntennaCatalog.py add or import-antex before importing station history. "
+                "A missing radome is not assumed to be NONE."
+            )
+
     def update_station_info(
         self, record: StationInfoRecord, new_record: StationInfoRecord
     ) -> None:
@@ -886,6 +900,8 @@ class StationInfo:
 
         if not (self.NetworkCode and self.StationCode):
             return
+
+        self.validate_antenna_radome(new_record)
 
         # Check for overlaps
         overlaps = self.overlaps(new_record)
@@ -938,6 +954,8 @@ class StationInfo:
                 "Cannot insert record without initializing pyStationInfo "
                 "with NetworkCode and StationCode"
             )
+
+        self.validate_antenna_radome(record)
 
         # Check if record already exists
         result = self.cnn.query(
