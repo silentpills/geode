@@ -308,6 +308,21 @@ def run_db_migrations(cnn: "Cnn"):
                 """)
         cnn.commit_transac()
 
+    # Catalog identity is the antenna/radome pair; model IDs remain unchanged.
+    from importlib.resources import files
+
+    catalog_ready = cnn.query_float(
+        "SELECT EXISTS (SELECT 1 FROM pg_constraint "
+        "WHERE conrelid = 'public.stationinfo'::regclass "
+        "AND conname = 'stationinfo_antenna_radome_fk')",
+        as_dict=True,
+    )[0]["exists"]
+    if not catalog_ready:
+        with cnn.cnn.transaction():
+            cnn.cursor.execute(
+                files("geode").joinpath("sql/antenna_radomes_v1.sql").read_text()
+            )
+
     ##################################################################
     # Index events(EventDate) and stacks(name): both are queried/filtered
     # on these columns often enough (event log lookups, stack name lookups)

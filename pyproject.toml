@@ -83,6 +83,7 @@ where = ["."]
 include = ["geode*", "com*"]
 
 [tool.setuptools.package-data]
+"geode" = ["sql/*.sql"]
 "geode.elasticity" = ["data/*"]
 "geode.etm.visualization" = ["*.png"]
 "geode.reports" = ["*.png", "flags/*.svg"]

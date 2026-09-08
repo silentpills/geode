@@ -51,6 +51,19 @@ class Antennas(BaseModel):
         db_table = 'antennas'
 
 
+class AntennaRadomes(BaseModel):
+    antenna_code = models.CharField(db_column='AntennaCode', max_length=22)
+    radome_code = models.CharField(db_column='RadomeCode', max_length=7)
+    api_id = models.AutoField(primary_key=True)
+
+    class Meta:
+        managed = True
+        db_table = 'antenna_radomes'
+        ordering = ['antenna_code', 'radome_code']
+        constraints = [models.UniqueConstraint(
+            fields=['antenna_code', 'radome_code'], name='antenna_radomes_pair_key')]
+
+
 class AprCoords(BaseModel):
     network_code = models.CharField(db_column='NetworkCode', max_length=3)
     # Field name made lowercase.
