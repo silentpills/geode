@@ -1,4 +1,4 @@
-FROM node:22 AS build
+FROM node:26 AS build
 
 # Add build argument for the API URL
 ARG VITE_API_URL
