@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/12/25 9:32 AM
 Author: Demian D. Gomez
 """
@@ -123,6 +123,7 @@ class SolutionData(ABC):
         self.soln: str = ""
         self.stack_name: str = ""
         self.project: str = ""
+        self.frames: List = []
 
         # Replace individual arrays with dataclass
         self.coordinates = CoordinateTimeSeries()
@@ -416,6 +417,7 @@ class SolutionData(ABC):
             )
 
             self.project = data["solution_options"]["project"]
+            self.frames = data["frames"]
             # no info on missing solutions when coming from json
             self.rnx_no_ppp = []
             self.time_vector_ns = np.array([])
@@ -445,6 +447,7 @@ class SolutionData(ABC):
             "gaps": self.gaps.tolist(),
             "excluded": self.excluded,
             "rnx_no_ppp": self.rnx_no_ppp,
+            "frames": self.frames,
         }
 
         with open(filepath, "w") as f:
@@ -509,7 +512,7 @@ class PPPSolutionData(SolutionData):
         config.solution.stack_name = "ppp"
         self.config = config
 
-    def load_data(self, cnn: Cnn = None, **kwargs) -> None:
+    def load_data(self, cnn: Optional[Cnn] = None, **kwargs) -> None:
         """Load PPP solutions from database"""
 
         if self.config.json_file:
@@ -522,7 +525,7 @@ class PPPSolutionData(SolutionData):
 
         self.create_continuous_time_vector()
 
-    def _load_ppp_solutions(self, cnn) -> None:
+    def _load_ppp_solutions(self, cnn: Cnn) -> None:
         """Load PPP coordinate solutions"""
         query = """
             SELECT "X", "Y", "Z", "Year", "DOY" FROM ppp_soln p1
@@ -533,6 +536,17 @@ class PPPSolutionData(SolutionData):
         solutions = self._execute_query(
             cnn, query, (self.network_code, self.station_code)
         )
+
+        # check for reference frame jumps
+        frames = cnn.query(
+            'SELECT DISTINCT on ("ReferenceFrame") "ReferenceFrame", "Year", "DOY" from ppp_soln WHERE '
+            '"NetworkCode" = \'%s\' AND "StationCode" = \'%s\' ORDER BY "ReferenceFrame", "Year", "DOY"'
+            % (self.network_code, self.station_code)
+        )
+
+        # more than one frame, add a jump
+        self.frames = frames.dictresult()
+        self.frames.sort(key=lambda k: (int(k["Year"]), int(k["DOY"])))
 
         # Use shared processing method
         self._process_coordinate_solutions(solutions, "PPP solutions")

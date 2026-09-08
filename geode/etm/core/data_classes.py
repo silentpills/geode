@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/21/25 4:58 PM
 Author: Demian D. Gomez
 """
@@ -13,6 +13,7 @@ import numpy as np
 from geode.etm.core.type_declarations import (
     AdjustmentModels,
     CovarianceFunction,
+    EtmException,
     FitStatus,
     JumpType,
     PeriodicStatus,
@@ -56,6 +57,8 @@ class AdjustmentResults(BaseDataClass):
     stochastic_signal: np.ndarray = 0
     spectral_index_random_noise: float = 0
     spectral_index_stochastic_noise: float = 0
+    periodogram_frequencies: np.ndarray = field(default_factory=lambda: np.array([]))
+    periodogram_power: np.ndarray = field(default_factory=lambda: np.array([]))
     variance_factor: float = 0
     wrms: float = 0
     obs_sigmas: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -78,6 +81,8 @@ class AdjustmentResults(BaseDataClass):
             "obs_sigmas",
             "covariance_matrix",
             "outlier_flags",
+            "periodogram_frequencies",
+            "periodogram_power",
         ]
         for field_name in array_fields:
             value = getattr(self, field_name)
@@ -144,7 +149,7 @@ class Earthquake(BaseDataClass):
     lat: float = None
     lon: float = None
     date: Date = None
-    depth: int = None
+    depth: int = 0
     magnitude: float = 0
     distance: float = 0
     location: str = None
@@ -196,7 +201,7 @@ class Earthquake(BaseDataClass):
 @dataclass
 class JumpParameters(BaseDataClass):
     jump_type: JumpType = field(default_factory=lambda: JumpType)
-    relaxation: np.ndarray = field(default_factory=lambda: np.array([0.5]))
+    relaxation: np.ndarray = field(default_factory=lambda: np.array([0.05, 1]))
     date: Date = None
     action: str = None
 
@@ -324,6 +329,12 @@ class ModelingParameters(BaseDataClass):
             mask = np.zeros(time_vector.shape).astype(bool)
             for win in self.data_model_window:
                 mask[np.logical_and(time_vector > win[0], time_vector < win[1])] = True
+
+            if ~np.any(mask):
+                raise EtmException(
+                    "Fit window yielded a null observation vector. Check your fit window dates "
+                    "and the available station data."
+                )
         else:
             mask = np.ones(time_vector.shape).astype(bool)
 
@@ -337,7 +348,10 @@ class ModelingParameters(BaseDataClass):
         for jump_params in self.user_jumps:
             if jump_params.date == date:
                 # dates match, check types
-                if jump_params.jump_type == jump_type:
+                if jump_params.jump_type == jump_type or (
+                    jump_type == JumpType.REFERENCE_FRAME
+                    and jump_params.jump_type == JumpType.MECHANICAL_MANUAL
+                ):
                     # types match exactly, so it is the jump being looked for
                     return jump_params
                 elif (
@@ -415,4 +429,4 @@ class ValidationRules(BaseDataClass):
     )
     min_solutions_for_etm: int = 4
     min_data_for_jump: int = 50  # data points
-    max_condition_number: float = 3.5  # log10 of the condition number
+    max_condition_number: float = 8  # log10 of the condition number

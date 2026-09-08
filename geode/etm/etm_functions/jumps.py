@@ -313,15 +313,30 @@ class JumpFunction(EtmFunction):
 
         for i in range(3):
             if not self.fit or not len(self.p.params):
-                output_table[i].append((self.format_str[0].format(0), "gray"))
+                if self.format_str:
+                    output_table[i].append((self.format_str[0].format(0), "gray"))
             else:
-                for j, param in enumerate(self.p.params[i]):
-                    output_table[i].append(
-                        (
-                            self.format_str[j].format(param * 1000.0),
-                            self.p.jump_type.color,
-                        )
+                if len(self.p.params[i]) != len(self.format_str):
+                    # @todo: root cause unknown — params and format_str can get out of sync.
+                    # Possible triggers: configure_behavior({'relaxation': ...}) is called
+                    # (e.g. in EtmFit._validate_function_design_matrix to drop relaxations when
+                    # condition number is too large) which updates p.relaxation and param_count
+                    # but does NOT trim p.params. If plot() is then called with the old params
+                    # still in place, the lengths diverge. Need to reproduce with a known station
+                    # (chc.bton) and add an assertion here to capture the call stack.
+                    logger.warning(
+                        f"print_parameters: params/format_str length mismatch for {repr(self)}: "
+                        f"params={len(self.p.params[i])} format_str={len(self.format_str)} "
+                        f"jump_type={self.p.jump_type} relaxation={self.p.relaxation}"
                     )
+                for j, param in enumerate(self.p.params[i]):
+                    if j < len(self.format_str):
+                        output_table[i].append(
+                            (
+                                self.format_str[j].format(param * 1000.0),
+                                self.p.jump_type.color,
+                            )
+                        )
 
         return output_table[0], output_table[1], output_table[2]
 
@@ -458,7 +473,9 @@ class JumpFunction(EtmFunction):
         override_params: np.ndarray = None,
         remove_postseismic=False,
     ):
-        """Implementation only removed jumps, not decay"""
+        """Evaluate jump signal. For COSEISMIC_JUMP_DECAY with remove_postseismic=False,
+        only the coseismic offset (step function column) is returned so that the postseismic
+        decay remains visible when removing jump offsets in visualization."""
 
         if (
             self.p.jump_type == JumpType.POSTSEISMIC_ONLY
@@ -473,21 +490,17 @@ class JumpFunction(EtmFunction):
         else:
             design = self.design
 
-        if self.p.jump_type not in (
-            JumpType.COSEISMIC_ONLY,
-            JumpType.MECHANICAL_MANUAL,
-            JumpType.MECHANICAL_ANTENNA,
-            JumpType.REFERENCE_FRAME,
-            JumpType.UNDETERMINED,
-        ):
-            # to return a 2d array
-            # design = design[:,[0]]
-            pass
+        params = (
+            override_params[component]
+            if override_params is not None
+            else self.p.params[component]
+        )
 
-        if override_params is not None:
-            return design @ override_params[component]
-        else:
-            return design @ self.p.params[component]
+        if self.p.jump_type == JumpType.COSEISMIC_JUMP_DECAY and not remove_postseismic:
+            # Only subtract the coseismic offset (step, column 0), leave postseismic decay visible
+            return design[:, 0] * params[0]
+
+        return design @ params
 
     def __lt__(self, other: "JumpFunction") -> bool:
         """Enable sorting of user_jumps by date"""
@@ -554,39 +567,69 @@ class JumpFunction(EtmFunction):
             # otherwise, decide based on the magnitude of events
             if lt_earthquake_min_days or lt_design_eq_min_days:
                 # Insufficient data separation, by date or data points - choose by magnitude if jump happened after
-                # start of the data. Otherwise, (before the start of data) leave most recent
+                # start of the data. Otherwise, (before the start of data) leave most recent,
+                # as long as magnitude of recent is >= than previous
                 if (
                     other.date.fyear < self._time_vector.min()
                     and self.date.fyear < self._time_vector.min()
+                    and self.magnitude <= other.magnitude
                 ):
-                    logger.debug("Decision made based on date")
-                    return True, self if self.date > other.date else other
+                    ret = self if self.date > other.date else other
+                    logger.debug(
+                        f"Conflict: {ret.date} {ret.p.jump_type} prevails, "
+                        f"decision made based on date"
+                    )
+                    return True, ret
                 else:
-                    logger.debug("Decision made based on magnitude")
-                    return True, self if self.magnitude > other.magnitude else other
+                    ret = self if self.magnitude > other.magnitude else other
+                    logger.debug(
+                        f"Conflict: {ret.date} {ret.p.jump_type} prevails, "
+                        f"decision made based on magnitude"
+                    )
+                    return True, ret
             else:
+                logger.debug("No conflict")
                 return False, None  # Can coexist
         elif self.is_geophysical() and not other.is_geophysical():
             if lt_design_jump_min_days:
+                logger.debug(
+                    f"Conflict: {self.date} {self.p.jump_type} prevails, "
+                    f"decision made on basis of geophysical jump"
+                )
                 return True, self  # geophysical prevails
             else:
+                logger.debug("No conflict")
                 return False, None  # Can coexist
         elif not self.is_geophysical() and other.is_geophysical():
             if lt_design_jump_min_days:
+                logger.debug(
+                    f"Conflict: {other.date} {other.p.jump_type} prevails, "
+                    f"decision made on basis of geophysical jump"
+                )
                 return True, other  # geophysical prevails
             else:
+                logger.debug("No conflict")
                 return False, None  # Can coexist
         else:
             # Two mechanical/generic user_jumps
             if lt_jump_min_days or lt_design_jump_min_days:
                 if other.p.jump_type != JumpType.AUTO_DETECTED:
+                    logger.debug(
+                        f"Conflict: {other.date} {other.p.jump_type} prevails, "
+                        f"decision made on basis jump date"
+                    )
                     return (
                         True,
                         other,
                     )  # Prefer the latest jump (if latest is not an auto jump)
                 else:
+                    logger.debug(
+                        f"Conflict: {self.date} {self.p.jump_type} prevails, "
+                        f"decision made on basis jump date"
+                    )
                     return True, self
             else:
+                logger.debug("No conflict")
                 return False, None  # Can coexist
 
     def is_geophysical(self) -> bool:

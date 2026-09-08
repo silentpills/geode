@@ -45,40 +45,32 @@ ArchiveService.py [options]
 
 ## AlterETM.py
 
-Alter default ETM parameters for stations. Can modify parameters for PPP and GAMIT simultaneously.
+Manage trajectory parameters with subcommands. The previous `-fun`, `-soln`, and
+`-print` interface has been replaced; update saved commands accordingly.
 
-**Arguments:**
+Run from the repository root in the Pixi environment:
 
-| Argument | Description |
-|----------|-------------|
-| `stnlist` | List of stations (see Station List Syntax) |
-| `-fun`, `--function_type` | Function type: polynomial (p), jump (j), periodic (q), or bulk jump removal (t) |
-| `-soln`, `--solution_type` | Solution type: `ppp`, `gamit`, or empty for both |
-| `-print`, `--print_params` | Print current database parameters |
-
-### Function Type Details
-
-**Polynomial (`p {terms}`):**
-- `terms = 2` for constant velocity
-- `terms = 3` for velocity + acceleration
-
-**Jump (`j {action} {type} {date} {relax}`):**
-- `action`: `+` (add) or `-` (remove)
-- `type`: `0` (mechanical) or `1` (geophysical)
-- `date`: Event date (yyyy/mm/dd, yyyy_doy, gpswk-wkday, fyear)
-- `relax`: Relaxation times for logarithmic decays (type=1 only)
-
-**Periodic (`q {periods}`):**
-- Periods as list in days (1 yr = 365.25)
-
-**Bulk removal (`t {max_magnitude} {stack_name}`):**
-- Remove earthquakes ≤ max_magnitude from trajectory models
-
-**Usage:**
 ```bash
-AlterETM.py net.station -fun p 2
-AlterETM.py net.station -fun j + 1 2024/01/15 30,60,90
+pixi run python -m com.AlterETM net.station polynomial --terms 2
+pixi run python -m com.AlterETM net.station periodic --periods 365.25 182.625
+pixi run python -m com.AlterETM net.station jump --add --type coseismic --date 2024/01/15 --relaxation 0.05 1
+pixi run python -m com.AlterETM net.station print
 ```
+
+Use `--solution ppp` or `--solution gamit` on the subcommand to restrict changes;
+the default is both. Relaxation times are in **years**. Run a subcommand with
+`--help` for its options. These commands modify database parameters.
+
+The fork retains relaxation defaults `[0.05, 1]`, a minimum earthquake spacing
+of 3 days, and a minimum jump spacing of 3 days. Upstream's newer defaults are
+not applied implicitly. Fit-window fixes remove jumps that cannot be estimated
+within the selected observations and reject an empty observation window.
+
+### Parallel plotting
+
+`pixi run python -m com.PlotETM net.station --parallel` enables Dispy processing.
+Without this flag, plotting runs serially. Parallel workers still need the GNSS
+configuration, dependencies, and database access described in the CLI setup guide.
 
 ---
 

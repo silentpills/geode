@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/15/25 8:56 AM
 Author: Demian D. Gomez
 """
@@ -130,7 +130,11 @@ class AdjustmentStrategy(ABC):
         # Linear fit to the LogLog spectrum plot
         fit_psd = np.polyfit(np.log10(fvec), np.log10(pxx), 1)
 
-        return fit_psd[0]  # Slope (spectral index)
+        return (
+            fit_psd[0],
+            fvec,
+            pxx,
+        )  # spectral index, frequency vector, amplitude vector
 
 
 class WhiteNoise(WeightBuilder):
@@ -490,11 +494,13 @@ class RobustLeastSquares(AdjustmentStrategy):
         results.obs_sigmas = np.sqrt(1 / np.diag(weights.matrix))
 
         # compute spectral index of residuals
-        si = self.compute_plomb(
+        si, fvec, pxx = self.compute_plomb(
             results.residuals[results.outlier_flags],
             time_vector_mjd[results.outlier_flags],
         )
         results.spectral_index_random_noise = si
+        results.periodogram_frequencies = fvec
+        results.periodogram_power = pxx
         logger.info(f"Spectral index of residuals: {si:.4f}")
 
         # declare the origin of the fit
@@ -594,14 +600,16 @@ class LeastSquaresCollocation(AdjustmentStrategy):
         results.outlier_flags = s <= limit
 
         # compute spectral index of residuals
-        si = self.compute_plomb(
+        si, fvec, pxx = self.compute_plomb(
             results.residuals[results.outlier_flags],
             time_vector_mjd[results.outlier_flags],
         )
         results.spectral_index_random_noise = si
+        results.periodogram_frequencies = fvec
+        results.periodogram_power = pxx
         logger.info(f"Spectral index of residuals: {si:.4f}")
 
-        si = self.compute_plomb(results.stochastic_signal, time_vector_cont_mjd)
+        si, _, _ = self.compute_plomb(results.stochastic_signal, time_vector_cont_mjd)
         results.spectral_index_stochastic_noise = si
         logger.info(f"Spectral index of stochastic noise: {si:.4f}")
 
@@ -762,17 +770,52 @@ class EtmFit:
         run_time = time()
 
         # allow replacing the design matrix
-        if design_matrix:
+        if design_matrix is not None:
             self.design_matrix = design_matrix
+        design_matrix = self.design_matrix
 
         # between the initialization of EtmFit and run_adjustment (which calls run_fit) there can
         # be deactivated jumps or changes in the design matrix that require the recomputation of the
         # internal constraints (meant to stabilize the system of equations). Call _validate_function_design_matrix
         # again to make sure that we have the right dimensions in internal_constraints
-        self._validate_function_design_matrix()
+        # Validate after removing unobservable jumps so constraint sizes match.
 
         # get mask for least squares collocation and prefit models
         mask = self.config.modeling.get_observation_mask(solution_data.time_vector)
+
+        # Deactivate jumps that fall entirely outside the fit window before building the
+        # design matrix. A jump at or before the first windowed observation produces an
+        # all-ones column (collinear with the polynomial constant); a jump at or after the
+        # last produces an all-zeros column. Both cause rank deficiency.
+        windowed_mjd = solution_data.time_vector_mjd[mask]
+        if windowed_mjd.size > 0:
+            needs_reindex = False
+            for func in [
+                f
+                for f in design_matrix.functions
+                if f.p.object == "jump"
+                and f.fit
+                and f.p.jump_type != JumpType.POSTSEISMIC_ONLY
+            ]:
+                jump_mjd = func.date.mjd
+                if jump_mjd <= windowed_mjd.min():
+                    logger.warning(
+                        f"Jump at {func.date.yyyyddd()} is at or before the start of the "
+                        f"fit window — deactivating (effect absorbed by polynomial offset)"
+                    )
+                    func.fit = False
+                    needs_reindex = True
+                elif jump_mjd >= windowed_mjd.max():
+                    logger.warning(
+                        f"Jump at {func.date.yyyyddd()} is at or after the end of the "
+                        f"fit window — deactivating (no observations to constrain it)"
+                    )
+                    func.fit = False
+                    needs_reindex = True
+            if needs_reindex:
+                design_matrix._assign_column_indices()
+
+        self._validate_function_design_matrix()
 
         # transform solutions to NEU
         neu = solution_data.transform_to_local()
@@ -893,6 +936,8 @@ class EtmFit:
                         # no need to check again, if it didn't work the first time it won't work the next one
                     elif f.p.relaxation.size > 1:
                         # jump collisions enabled: modify the etm if needed
+                        # @todo: evaluate the possibility of modifying the downstream jumps to remove smallest relax
+                        # as long as the magnitude of the downstream jump is < to the one being evaluated here
                         logger.info("Removing smallest relaxation")
                         min_index = np.argmin(f.p.relaxation)
                         rlx = np.delete(f.p.relaxation, min_index)
@@ -961,7 +1006,7 @@ class EtmFit:
         pass
 
     def process_covariance(self):
-        cov = np.zeros((3, 1))
+        cov = np.zeros(3)
 
         self.covar = np.diag([r.wrms**2 for r in self.results])
 

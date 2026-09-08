@@ -1,10 +1,10 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/22/25 8:53 AM
 Author: Demian D. Gomez
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,16 +17,18 @@ from ..core.data_classes import BaseDataClass
 class ComponentData:
     """Data for one coordinate component"""
 
-    observations: np.ndarray
-    observations_fit: np.ndarray
-    observations_not_fit: np.ndarray
-    time_vector: np.ndarray
-    time_vector_fit: np.ndarray
-    time_vector_not_fit: np.ndarray
+    observations: np.ndarray = field(default_factory=lambda: np.array([]))
+    observations_fit: np.ndarray = field(default_factory=lambda: np.array([]))
+    observations_not_fit: np.ndarray = field(default_factory=lambda: np.array([]))
+    time_vector: np.ndarray = field(default_factory=lambda: np.array([]))
+    time_vector_fit: np.ndarray = field(default_factory=lambda: np.array([]))
+    time_vector_not_fit: np.ndarray = field(default_factory=lambda: np.array([]))
+    mask: np.ndarray = field(default_factory=lambda: np.array([]))
     model_values: Optional[np.ndarray] = None
     model_time_vector: Optional[np.ndarray] = None
     confidence_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None
     residuals: Optional[np.ndarray] = None
+    residuals_not_fit: Optional[np.ndarray] = None
     outlier_flags: Optional[np.ndarray] = None
     time_range: Optional[Tuple[float, float]] = None
 
@@ -46,6 +48,8 @@ class TimeSeriesPlotData:
     north_data: ComponentData
     east_data: ComponentData
     up_data: ComponentData
+
+    missing_solutions: np.ndarray = field(default_factory=lambda: np.array([]))
 
     # ETM results
     has_etm_results: bool = False
@@ -67,29 +71,6 @@ class TimeSeriesPlotData:
 
 
 @dataclass
-class HistogramPlotData:
-    """Container for histogram plot data"""
-
-    station_id: str
-    solution_type: str
-    completion: float
-    latitude: float
-    longitude: float
-
-    # Residual data (in mm)
-    north_residuals: np.ndarray
-    east_residuals: np.ndarray
-    up_residuals: np.ndarray
-
-    # Covariance information
-    covariance_matrix: Optional[np.ndarray] = None
-    variance_diagonal: Optional[np.ndarray] = None
-
-    # Filter flags
-    outlier_flags: Optional[np.ndarray] = None
-
-
-@dataclass
 class PlotOutputConfig(BaseDataClass):
     """Configuration for plot output"""
 
@@ -106,7 +87,8 @@ class PlotOutputConfig(BaseDataClass):
     plot_remove_polynomial: bool = False
     plot_remove_periodic: bool = False
     plot_remove_stochastic: bool = False
+    plot_no_model: bool = False
 
     # Missing data
-    missing_solutions: Optional[List] = None
+    plot_missing_solutions: bool = False
     interactive: bool = False

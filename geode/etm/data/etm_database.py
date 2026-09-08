@@ -112,8 +112,9 @@ def load_parameters_db(
             for i in range(3):
                 funct.p.params[i] = np.array(obj["params"][i]).astype(float)
                 funct.p.sigmas[i] = np.array(obj["sigmas"][i]).astype(float)
-                # save the sigmas in continuous form to upload them to
-                if funct.p.object != "stochastic":
+                # save the sigmas in continuous form - only for fitted functions
+                # (parameters vector only contains fitted function params)
+                if funct.p.object != "stochastic" and funct.fit:
                     etm_results.results[i].parameter_sigmas = np.concatenate(
                         (etm_results.results[i].parameter_sigmas, funct.p.sigmas[i])
                     )
@@ -124,10 +125,21 @@ def load_parameters_db(
                     ).astype(float)
                     stochastic_signal = funct
 
-    # laod the parameters vector
+    # load the parameters vector
     var_factor = next(
         (item for item in etms if item.get("object") == "var_factor"), None
     )
+
+    # guard: if the saved parameter count no longer matches the current design matrix (e.g. because
+    # a jump was deactivated inside run_fit() after the solution was saved, changing the column count
+    # without affecting the hash), force recomputation rather than crashing on the matmul below.
+    dm_cols = dm.matrix.shape[1]
+    if any(len(var_factor["params"][i]) != dm_cols for i in range(3)):
+        logger.warning(
+            f"Cached parameter vector length ({len(var_factor['params'][0])}) does not match "
+            f"current design matrix column count ({dm_cols}) — discarding cached solution"
+        )
+        return False
 
     for i in range(3):
         etm_results.results[i].origin = (

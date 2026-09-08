@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/22/25 8:38 AM
 Author: Demian D. Gomez
 """
@@ -14,7 +14,7 @@ warnings.filterwarnings("ignore", message="Starting a Matplotlib GUI outside")
 import matplotlib
 
 matplotlib.use("Agg")  # Non-interactive backend
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
@@ -29,11 +29,47 @@ from ..visualization.data_classes import (
 )
 
 # app
-from ..visualization.data_prep import PlotTemplate
+from ..visualization.plot_template import PlotTemplate
 
 
 class TimeSeriesTemplate(PlotTemplate):
     """Template for time series plots"""
+
+    def determine_layout(
+        self, plot_data: TimeSeriesPlotData, output_config: PlotOutputConfig
+    ) -> Dict[str, Any]:
+        """Determine plot layout based on data and configuration"""
+        show_outliers = (
+            output_config
+            and output_config.plot_show_outliers
+            and plot_data.has_etm_results
+        )
+
+        if show_outliers:
+            fig_size = (16, 10)
+            subplot_config = {"nrows": 3, "ncols": 2, "sharex": True}
+            main_axes_indices = [0, 2, 4]
+            outlier_axes_indices = [1, 3, 5]
+        else:
+            fig_size = (16, 10)
+            subplot_config = {"nrows": 3, "ncols": 1, "sharex": True}
+            main_axes_indices = [0, 1, 2]
+            outlier_axes_indices = None
+
+            if output_config.plot_missing_solutions:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Missing solutions requested but the outlier panel was not requested"
+                )
+
+        return {
+            "fig_size": fig_size,
+            "subplot_config": subplot_config,
+            "main_axes_indices": main_axes_indices,
+            "outlier_axes_indices": outlier_axes_indices,
+            "show_outliers": show_outliers,
+        }
 
     def create_figure_layout(self, layout: Dict[str, Any]) -> Tuple[plt.Figure, List]:
         """Create time series figure layout"""
@@ -196,7 +232,7 @@ class TimeSeriesTemplate(PlotTemplate):
             if data.outlier_flags is not None:
                 good_mask = data.outlier_flags
                 ax.plot(
-                    data.time_vector[good_mask],
+                    data.time_vector_fit[good_mask],
                     data.residuals[good_mask],
                     color=self.colors["observations"],
                     **self.styles["observations"],
@@ -206,6 +242,14 @@ class TimeSeriesTemplate(PlotTemplate):
                     data.time_vector,
                     data.residuals,
                     color=self.colors["observations"],
+                    **self.styles["observations"],
+                )
+
+            if np.any(~data.mask):
+                ax.plot(
+                    data.time_vector_not_fit,
+                    data.residuals_not_fit,
+                    color=self.colors["observations_not_fit"],
                     **self.styles["observations"],
                 )
 
@@ -300,8 +344,23 @@ class TimeSeriesTemplate(PlotTemplate):
                 family="monospace",
             )
 
-    def apply_time_window(self, ax, time_window: Tuple[float, float]) -> None:
+    def apply_time_window(
+        self, ax, time_window: Union[Tuple[float, float], int, float]
+    ) -> None:
         """Apply time window to axis"""
+
+        if isinstance(time_window, (float, int)):
+            time_window = (
+                (self.config.metadata.last_obs - int(time_window)).fyear,
+                self.config.metadata.last_obs.fyear,
+            )
+
+        if len(time_window) < 2:
+            time_window = (time_window[0], self.config.metadata.last_obs.fyear)
+
+        if time_window[0] < self.config.metadata.first_obs.fyear:
+            time_window = (self.config.metadata.first_obs.fyear, time_window[1])
+
         ax.set_xlim(time_window)
         # Auto-scale y-axis for the visible data
         self._autoscale_y_axis(ax)

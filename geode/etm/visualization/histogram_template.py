@@ -1,5 +1,5 @@
 """
-Project: Geodesy Database Engine (GeoDE)
+Project: Geodetic Database Engine (GeoDE)
 Date: 9/22/25 8:39 AM
 Author: Demian D. Gomez
 """
@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib.patches import Ellipse
 
 from ..visualization.data_classes import PlotOutputConfig, TimeSeriesPlotData
-from ..visualization.data_prep import PlotTemplate
+from ..visualization.plot_template import PlotTemplate
 
 
 class HistogramTemplate(PlotTemplate):
