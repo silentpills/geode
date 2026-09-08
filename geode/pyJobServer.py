@@ -319,6 +319,7 @@ class JobServer:
                     node,
                     self.check_gamit_tables,
                     self.check_archive,
+                    self.check_executables,
                     self.check_atx,
                     self.software_sync,
                 )

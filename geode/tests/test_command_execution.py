@@ -72,6 +72,7 @@ def test_failed_cluster_submission_does_not_wait():
     )
     server.check_gamit_tables = None
     server.check_archive = True
+    server.check_executables = False
     server.check_atx = True
     server.software_sync = ()
     server.result = []
@@ -80,3 +81,7 @@ def test_failed_cluster_submission_does_not_wait():
     server.check_cluster(dispy.DispyNode.Initialized, node, None)
     assert server.nodes == []
     assert server.result == []
+
+    server.cluster.submit_node.assert_called_once_with(
+        node, None, True, False, True, ()
+    )

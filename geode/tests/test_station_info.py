@@ -435,3 +435,23 @@ class TestPickling:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_gamit_export_transliterates_text_without_changing_metadata():
+    from geode.pyDate import Date
+
+    record = StationInfoRecord(
+        StationCode="test",
+        StationName="Málaga Øresund",
+        Comments="Łódź Straße",
+        DateStart=Date(year=2020, doy=1),
+        DateEnd=Date(stninfo=None),
+    )
+    output = str(record)
+    assert output.isascii()
+    assert "Malaga Oresund" in output
+    assert "Lodz Strasse" in output
+    assert record.StationName == "Málaga Øresund"
+    assert record.Comments == "Łódź Straße"
+    assert record.to_database_dict()["DateEnd"] is None
+    assert "StationName" not in record.to_database_dict()
