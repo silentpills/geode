@@ -85,3 +85,39 @@ def test_failed_cluster_submission_does_not_wait():
     server.cluster.submit_node.assert_called_once_with(
         node, None, True, False, True, ()
     )
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "PlotETM",
+        "AlterETM",
+        "EtmStacker",
+        "ScanArchive",
+        "ArchiveService",
+        "DownloadSources",
+        "LocateRinex",
+        "StationReport",
+        "StationKmz",
+        "CampaignPlanner",
+    ],
+)
+def test_cli_help_requires_no_database(tool, tmp_path):
+    import os
+
+    # Installed CLI modules must work outside the checkout without a config file.
+    environment = {
+        **os.environ,
+        "POSTGRES_HOST": "invalid.invalid",
+        "MPLBACKEND": "Agg",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", f"com.{tool}", "--help"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout.lower()

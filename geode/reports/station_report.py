@@ -186,7 +186,7 @@ def _encode_image(
                 new_h = int(iw / target_ratio)
                 top = (ih - new_h) // 2
                 img = img.crop((0, top, iw, top + new_h))
-        img.thumbnail(max_size, Image.LANCZOS)
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
         buf = io.BytesIO()
         img.save(buf, "JPEG", quality=quality)
         b64 = base64.b64encode(buf.getvalue()).decode()

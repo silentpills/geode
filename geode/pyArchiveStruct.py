@@ -12,8 +12,6 @@ declared directory structure and {stmn}{doy}{session}.{year}d.Z, respectively)
 import os
 
 # deps
-import scandir
-
 # app
 from . import Utils, pyEvents, pyOptions, pyRinexName
 from .pyRinexName import RinexNameFormat
@@ -336,7 +334,7 @@ class RinexStruct(object):
         rnx = []
         path2rnx = []
         fls = []
-        for path, _, files in scandir.walk(rootdir):
+        for path, _, files in os.walk(rootdir):
             for file in files:
                 file_path = os.path.join(path, file)
                 crinex = file_path.rsplit(rootdir + "/")[1]
@@ -364,7 +362,7 @@ class RinexStruct(object):
 
         stninfo = []
         path2stninfo = []
-        for path, dirs, files in scandir.walk(rootdir):
+        for path, dirs, files in os.walk(rootdir):
             for file in files:
                 file_path = os.path.join(path, file)
                 if file.endswith(".info"):

@@ -53,5 +53,10 @@ HTML escaping, PDF/KMZ export, and offline campaign-planning checks. PostgreSQL
 executables are part of the Pixi dev feature; the database test creates and shuts
 down its own temporary server using a local Unix socket.
 
+The existing typecheck job remains informational and still reports issues; lint,
+formatting, and runtime tests are separate checks. CLI help smoke tests also
+verify that the installed commands load outside the checkout without a database
+or a GNSS configuration file.
+
 Real GAMIT/GFZRNX/GPSPACE processing, an operational Dispy cluster, and an actual
 Docker deployment require their respective external tools and infrastructure.

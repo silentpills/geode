@@ -259,7 +259,7 @@ def fetch_maps(
         img = m.render(zoom=zoom, center=(lon, lat))
         # Ensure exact output size (staticmap may return slightly different dims)
         if img.size != (OUTPUT_W, OUTPUT_H):
-            img = img.resize((OUTPUT_W, OUTPUT_H), Image.LANCZOS)
+            img = img.resize((OUTPUT_W, OUTPUT_H), Image.Resampling.LANCZOS)
         return img.convert("RGB")
 
     def _placeholder(label: str, error: str) -> "Image.Image":

@@ -23,7 +23,6 @@ import zipfile
 from decimal import Decimal
 
 import numpy
-import scandir
 
 # deps
 from tqdm import tqdm
@@ -834,7 +833,7 @@ def scan_rinex(cnn, JobServer, pyArchive, archive_path, master_list, ignore):
 
     ignore = ignore[0] == 1
 
-    for path, _, files in scandir.walk(archive_path):
+    for path, _, files in os.walk(archive_path):
         for sfile in files:
             # DDG issue #15: match the name of the file to a valid rinex filename
             try:

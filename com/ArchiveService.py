@@ -64,7 +64,7 @@ from geode.Utils import (
 )
 
 repository_data_in = ""
-cnn = dbConnection.Cnn("gnss_data.cfg")
+cnn = None
 station_import_counts = {}  # net.stnm -> count of files imported this run
 
 
@@ -1075,6 +1075,7 @@ def main():
     add_version_argument(parser)
 
     args = parser.parse_args()
+    cnn = dbConnection.Cnn("gnss_data.cfg")
 
     Config = pyOptions.ReadOptions("gnss_data.cfg")
 
