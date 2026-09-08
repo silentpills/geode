@@ -43,7 +43,6 @@ class EtmStacker:
     """Simplified main class focusing on orchestration."""
 
     def __init__(self, config: EtmStackerConfig = None):
-
         # Core data
         self.stations: List[Station] = []
         self.normal_equations: List[NormalEquations] = []
@@ -185,7 +184,6 @@ class EtmStacker:
         json_folder: str = None,
         save_json_folder: str = None,
     ):
-
         loaded_from_json = False
         saved_obs_sigmas = None
         prefit: List[JumpFunction] = []
@@ -633,7 +631,6 @@ class EtmStacker:
 
     @staticmethod
     def _create_station(etm: EtmEngine):
-
         station = Station(
             etm.config.network_code,
             etm.config.station_code,
@@ -750,7 +747,6 @@ class EtmStacker:
         self._register_constraints()
 
     def change_station_weight(self, station_id: str, new_weight: float, silent=False):
-
         found = False
         for neq in self.normal_equations:
             if neq.station == station_id:
@@ -884,7 +880,6 @@ class EtmStacker:
         return self._extract_results()
 
     def _sum_constraint_weighted_residuals(self):
-
         # Count active equations first
         n_active = self.total_constraints
         # Pre-allocate
@@ -1020,7 +1015,6 @@ class EtmStacker:
                 )
 
     def _record_earthquakes(self):
-
         # open connection to database
         cnn = Cnn("gnss_data.cfg")
 
@@ -1439,7 +1433,6 @@ class EtmStacker:
         return len(apply_to)
 
     def plot_grid_result(self, sigmas=False):
-
         input_names = [stationID(stn) for stn in self.stations]
         input_lon = [stn.lon for stn in self.stations]
         input_lat = [stn.lat for stn in self.stations]
@@ -1561,7 +1554,6 @@ class EtmStacker:
         print("(EtmStacker) > ", end="", flush=True)
 
     def _extract_results(self) -> Tuple[List, List]:
-
         interseismic = []
         earthquakes = []
         for stn in self.stations:
@@ -1613,7 +1605,6 @@ class EtmStacker:
         return interseismic, earthquakes
 
     def interpolate_fields_to_grid(self):
-
         if self.solved:
             # clean any previous runs
             self.fields = []

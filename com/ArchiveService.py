@@ -388,7 +388,6 @@ def verify_rinex_multiday(cnn, rinexinfo, Config):
 
 
 def process_crinex_file(crinez, filename, data_rejected, data_retry):
-
     imported_station = None  # set to 'net.stnm' if a new record is inserted
 
     # create a uuid temporary folder in case we cannot read

@@ -325,7 +325,6 @@ class GridSystem:
         disk_grid_spacing: float,
         interpolation_grid: np.ndarray,
     ):
-
         tqdm.write(
             f"Computing rectangular load grid response for interpolation "
             f"grid (total points {interpolation_grid[0].shape[0]})"
@@ -385,7 +384,6 @@ class GridSystem:
         grid_y: np.ndarray,
         tension=0.10,
     ):
-
         length_scale = (
             np.abs(
                 np.max(grid_x.flatten())
@@ -584,7 +582,6 @@ class GridSystem:
     def compute_sw_forward_matrix(
         self, source_x: np.ndarray, source_y: np.ndarray, mask: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
-
         q, p, w = get_qpw(
             np.column_stack([source_x, source_y]),
             np.column_stack(

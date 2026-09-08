@@ -58,7 +58,6 @@ class PostseismicConstraint(SWOkada):
         spline_tension: float = 0.10,
         is_collision: bool = False,
     ):
-
         super().__init__(
             event,
             fault_geometry,
@@ -192,7 +191,6 @@ class PostseismicConstraint(SWOkada):
             return np.array([]), np.array([])
 
     def _get_target_cols(self, station: Station, constraining: List[Station]):
-
         target_idx = station.get_postseismic_column(self.event.id, self.relaxation)
         idx = np.array(
             [

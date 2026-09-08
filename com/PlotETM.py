@@ -693,7 +693,6 @@ def process_fit_dates(args):
 
 
 def print_query(args, etm: EtmEngine):
-
     from geode.Utils import lg2ct
 
     mode_obs = (
