@@ -64,3 +64,19 @@ or a GNSS configuration file.
 
 Real GAMIT/GFZRNX/GPSPACE processing, an operational Dispy cluster, and an actual
 Docker deployment require their respective external tools and infrastructure.
+
+
+## Fork maintenance after integration
+
+The follow-up maintenance keeps Django on 5.2 LTS and reconciles its processing
+model history in migration 0037. Empty and existing processing databases now
+share one initialization command. Fresh migrations create no login accounts;
+use the explicit administrator command.
+
+Docker and API tests share the locked Pixi runtime, including the patched DRF
+3.17 series. Startup stops on migration failures, and readiness checks the actual
+database/migration state. CI now includes the complete historical Django suite,
+frontend and documentation builds, and a fresh Docker deployment smoke test.
+The repaired Python audit found vulnerable dependencies that were updated;
+public release and package publication automation has been removed from `dev`.
+See [operations](operations.md) for backup/restore and update procedures.

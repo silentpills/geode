@@ -13,8 +13,7 @@ pixi install --locked
 ```
 
 Pixi installs the local source as an editable package in `.pixi/envs/default`.
-Use `pixi run python -m com.<Tool>` from the repository root. Installing
-`geode-gnss` from PyPI installs the published package, which may differ from this fork.
+Use `pixi run python -m com.<Tool>` from the repository root. This fork is installed from source and is not published to PyPI.
 
 ## Configuration File
 

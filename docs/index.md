@@ -27,9 +27,9 @@ Developed by [Demian Gomez](https://github.com/demiangomez) and contributors, Ge
 ## Quick Start
 
 ```bash
-git clone https://github.com/demiangomez/Parallel.GAMIT.git
+git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
-pixi install
+pixi install --locked
 pixi shell
 ```
 

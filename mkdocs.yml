@@ -28,6 +28,7 @@ nav:
     - Configuration: reference/configuration.md
   - Development:
     - Contributing: development/contributing.md
+    - Operations: development/operations.md
     - Upstream Integration: development/upstream-integration.md
 
 markdown_extensions:

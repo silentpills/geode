@@ -37,16 +37,14 @@ Ensure the following dependencies are installed and available in your PATH:
 - **rnx2crx/crx2rnx** - https://terras.gsi.go.jp/ja/crx2rnx.html
 - **GPSPACE** - https://github.com/demiangomez/GPSPACE
 - **PostgreSQL** (server)
-- **Python 3.10**
+- **Pixi 0.80.0** (manages Python 3.13)
 
 ### Database Setup
 
-1. Deploy the database skeleton using `database/schema.sql`
-2. Configure required tables using the provided CSV files:
-   - `keys.csv` - System configuration keys
-   - `rinex_tank_struct.csv` - RINEX file storage structure
-   - `receivers.csv` & `antennas.csv` - IGS equipment codes
-   - `gamit_htc.csv` - Antenna height/offset calibrations
+Use `pixi run -e web db:migrate` against an empty database, or let Docker run
+that command at startup. It creates the processing schema, reference catalogs,
+and web tables together. No default login accounts are installed. See
+[Database setup](docs/installation/database-setup.md).
 
 ### CLI Installation
 
@@ -58,7 +56,7 @@ pixi install --locked
 
 Use `.env` for database credentials and `gnss_data.cfg` for archive paths, external executables, and compute nodes. Run commands from this checkout with `pixi run python -m com.PlotETM --help`, for example. See [INSTALL.md](INSTALL.md) for setup.
 
-The `dev` branch contains both the processing library and web application. The backend Docker image builds the library from this checkout, so deploying the fork does not depend on a separate upstream release. `main` is kept as an upstream mirror.
+The `dev` branch contains both the processing library and web application. The backend Docker image builds the library from this checkout, so deploying the fork does not depend on a separate upstream release. `main` is kept as an upstream mirror. This fork has no PyPI publication or release automation.
 
 ## Core CLI Tools
 

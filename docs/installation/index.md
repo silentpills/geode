@@ -1,6 +1,6 @@
 # Installation Overview
 
-GeoDE requires Python 3.10 or later and several external dependencies.
+This fork uses Pixi 0.80.0 with Python 3.13 and PostgreSQL 18. External processing tools depend on the workloads you run.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ cd geode
 pixi install --locked
 ```
 
-This installs Python libraries and dependencies but does not set up database tools.
+This installs Python libraries and PostgreSQL development tools in the repository. Initialize your database separately using the migration command in the database setup guide.
 
 ### Development Environment with Pixi
 
