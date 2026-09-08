@@ -25,17 +25,16 @@ cp gnss_data.cfg.example gnss_data.cfg
 # Set database credentials in .env; set processing paths in gnss_data.cfg
 ```
 
-GeoDE commands look for `gnss_data.cfg` in the current working directory.
+Database credentials belong in `.env` (`POSTGRES_HOST`, `POSTGRES_PORT`,
+`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`). They take precedence over
+legacy `[postgres]` credentials. Keep processing paths in `gnss_data.cfg`.
+GeoDE commands normally look for that file in the current working directory.
 
 ### Configuration Sections
 
 ```ini
 [postgres]
-# Database connection information
-hostname = your-db-server.example.com
-username = geode
-password = your_secure_password
-database = geode
+# Legacy database fields may be omitted when using .env.
 
 # Directory for format scripts (data download processing)
 format_scripts_path = /path/to/format_scripts

@@ -59,6 +59,21 @@ dependencies = [
     "geopandas"
 ]
 
+[project.scripts]
+"PlotETM.py" = "com.PlotETM:main"
+"AlterETM.py" = "com.AlterETM:main"
+"EtmStacker.py" = "com.EtmStacker:main"
+"ScanArchive.py" = "com.ScanArchive:main"
+"ArchiveService.py" = "com.ArchiveService:main"
+"DownloadSources.py" = "com.DownloadSources:main"
+"LocateRinex.py" = "com.LocateRinex:main"
+"StationReport.py" = "com.StationReport:main"
+"StationKmz.py" = "com.StationKmz:main"
+"CampaignPlanner.py" = "com.CampaignPlanner:main"
+
+[project.optional-dependencies]
+reports = ["pillow>=9.0", "staticmap>=0.5.7", "weasyprint>=60.0"]
+
 [project.urls]
 "Homepage" = "https://github.com/demiangomez/geode"
 "Bug Tracker" = "https://github.com/demiangomez/geode/issues"

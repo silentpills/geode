@@ -40,13 +40,13 @@ We recommend using [Pixi](https://prefix.dev/) to manage the Python environment 
 
 1. **Clone the repository:**
     ```bash
-    git clone https://github.com/demiangomez/Parallel.GAMIT.git
+    git clone --branch dev https://github.com/silentpills/geode.git
     cd geode
     ```
 
 2. **Install dependencies:**
     ```bash
-    pixi install
+    pixi install --locked
     ```
 
 3. **Activate the shell:**

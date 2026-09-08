@@ -31,8 +31,8 @@ The **default** environment now includes the `dev` feature, so `pixi install` au
 ### Docs Environment
 ```bash
 pixi shell -e docs     # For building documentation
-pixi run docs:serve    # Preview docs
-pixi run docs:build    # Build static docs
+pixi run -e docs docs:serve    # Preview docs
+pixi run -e docs docs:build    # Build static docs
 ```
 
 ## 🛠️ Common Tasks

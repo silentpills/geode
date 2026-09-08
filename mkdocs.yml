@@ -21,11 +21,13 @@ nav:
     - CLI Tools: installation/cli-tools.md
   - Usage:
     - CLI Reference: usage/cli-reference.md
+    - Reports and Campaigns: usage/reports-and-campaigns.md
     - Web Interface: usage/web-interface.md
   - Reference:
     - Configuration: reference/configuration.md
   - Development:
     - Contributing: development/contributing.md
+    - Upstream Integration: development/upstream-integration.md
 
 markdown_extensions:
   - admonition

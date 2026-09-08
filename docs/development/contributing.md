@@ -89,7 +89,7 @@ Documentation uses MkDocs with the Material theme.
 ### Preview documentation locally:
 
 ```bash
-pixi run docs:serve
+pixi run -e docs docs:serve
 ```
 
 Then open http://127.0.0.1:8000 in your browser.
@@ -97,7 +97,7 @@ Then open http://127.0.0.1:8000 in your browser.
 ### Build documentation:
 
 ```bash
-pixi run docs:build
+pixi run -e docs docs:build
 ```
 
 ## Commit Messages

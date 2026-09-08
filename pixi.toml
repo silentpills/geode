@@ -60,12 +60,17 @@ usgs-libcomcat = "*"
 legacy-cgi = ">=2.6.4, <3"
 python-dotenv = ">=1.0.0"
 
+[feature.reports.pypi-dependencies]
+staticmap = ">=0.5.7"
+weasyprint = ">=60.0"
+
 [environments]
 # Default environment includes dev features for local development
 default = { features = ["dev"], solve-group = "default" }
 
 # Docs environment for building documentation
 docs = { features = ["docs"], solve-group = "default" }
+reports = { features = ["dev", "reports"], solve-group = "default" }
 
 [feature.docs.pypi-dependencies]
 mkdocs = "*"
@@ -88,12 +93,12 @@ format = { cmd = "ruff format geode com" }
 typecheck = { cmd = "ty check --output-format github geode com" }
 
 # Documentation
-"docs:serve" = { cmd = "mkdocs serve", depends-on = ["docs"] }
-"docs:build" = { cmd = "mkdocs build", depends-on = ["docs"] }
+"docs:serve" = { cmd = "mkdocs serve" }
+"docs:build" = { cmd = "mkdocs build" }
 
 # Pre-commit hooks
-"precommit:install" = { cmd = "pre-commit install --install-hooks", depends-on = ["dev"] }
-"precommit:run" = { cmd = "pre-commit run --all-files", depends-on = ["dev"] }
+"precommit:install" = { cmd = "pre-commit install --install-hooks" }
+"precommit:run" = { cmd = "pre-commit run --all-files" }
 
 # All checks (useful for CI)
 check = { cmd = "ruff check geode com && ruff format --check geode com && ty check geode com && pytest" }
