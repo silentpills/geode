@@ -1,13 +1,9 @@
 #!/bin/bash
-
-echo "Attempting database migrations..."
-if python /code/manage.py migrate --noinput; then
-    echo "Migrations complete."
-else
-    echo "WARNING: Migrations failed (database may not be available yet)."
-    echo "The application will start, but you may need to run migrations manually:"
-    echo "  docker exec -it gnss-backend python /code/manage.py migrate"
+set -euo pipefail
+# The generated hook activates the same locked environment used for API tests.
+if [[ -f /app/runtime-hook.sh ]]; then
+    source /app/runtime-hook.sh
 fi
-
-echo "Starting application..."
+python /app/web/backend/manage.py wait_for_database --timeout "${DATABASE_WAIT_SECONDS:-60}"
+python /app/web/backend/manage.py migrate --noinput
 exec "$@"

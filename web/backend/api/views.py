@@ -1,3 +1,5 @@
+from django.db import transaction
+from django.utils.decorators import method_decorator
 from rest_framework.permissions import AllowAny
 from collections import defaultdict
 from django.shortcuts import get_object_or_404
@@ -1422,6 +1424,7 @@ class ExecutionsDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = serializers.ExecutionsSerializer
 
 
+@method_decorator(transaction.non_atomic_requests, name="dispatch")
 class HealthCheck(APIView):
     # Readiness must be usable before the first administrator exists.
     authentication_classes = []

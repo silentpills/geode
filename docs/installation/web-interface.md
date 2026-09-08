@@ -1,176 +1,89 @@
-# Web Interface Setup
+# Web interface setup
 
-The GeoDE web interface provides a visual way to manage station metadata, view RINEX data, and monitor processing. It consists of a Django backend and React frontend, deployed via Docker Compose.
+Deploy this fork from `dev`. It contains the processing library, Django API,
+Celery workers, and React frontend in one checkout. There are no release or PyPI
+publication steps.
 
-## Prerequisites
+## Configure
 
-- Docker and Docker Compose installed
-- PostgreSQL database configured (see [Database Setup](database-setup.md))
-- Network access between Docker containers and database
-
-## Configuration Files
-
-### 1. Root `.env` File
-
-Copy the example file and edit it:
+Install Docker Engine with the Compose plugin. The backend lock currently
+supports Linux x86-64 deployment; native Pixi development also supports Apple
+Silicon. From the repository root:
 
 ```bash
 cp .env.example .env
+mkdir -p var/media
 ```
 
-Key settings to configure:
+Edit `.env`. Choose a database password and generate `DJANGO_SECRET_KEY` with
+`python3 -c 'import secrets; print(secrets.token_urlsafe(50))'`. Set the hostnames
+in `DJANGO_ALLOWED_HOSTS`, the public URL in `VITE_API_URL`, and `APP_PORT`.
+Include `127.0.0.1` in allowed hosts for the container readiness probe. Set
+`USER_ID_TO_SAVE_FILES` and `GROUP_ID_TO_SAVE_FILES` to your `id -u` and `id -g`,
+and ensure the media directory is writable by that user.
+
+The default media mount is `./var/media`; set `MEDIA_FOLDER_HOST_PATH` if using
+another directory. Processing configuration in `gnss_data.cfg` is needed for CLI
+processing, not for basic web setup.
+
+## Start with bundled PostgreSQL
 
 ```bash
-# PostgreSQL Connection
-# Use host.docker.internal for local setup (Docker reaching host PostgreSQL)
-# Use hostname/IP for remote database
-POSTGRES_HOST=host.docker.internal
-POSTGRES_PORT=5432
-POSTGRES_DB=geode
-POSTGRES_USER=geode
-POSTGRES_PASSWORD=your_secure_password
-
-# Django Settings - generate a secure secret key:
-#   python3 -c "import secrets; print(secrets.token_urlsafe(50))"
-DJANGO_SECRET_KEY=<paste-generated-key-here>
-DJANGO_DEBUG=False
-
-# Docker/Web UI Settings
-APP_PORT=8080
-VITE_API_URL=http://localhost:8080
-
-# Directory on host for uploaded station images and files
-# This folder will be mounted into the container
-MEDIA_FOLDER_HOST_PATH=/home/username/geode-media
-
-# File ownership (run 'id' to find your UID/GID)
-USER_ID_TO_SAVE_FILES=1000
-GROUP_ID_TO_SAVE_FILES=1000
+docker compose --profile bundled-db up --build -d --wait
 ```
 
-Create the media directory:
+The backend waits for PostgreSQL, runs the complete migration chain, and starts
+Gunicorn, Celery, Beat, and a loopback-only Redis instance. A failed migration
+stops startup. The frontend waits until the API readiness probe reports a
+reachable database with no pending migrations.
+
+Create your administrator explicitly:
 
 ```bash
-mkdir -p ~/geode-media
+docker compose exec backend python manage.py createadmin --username yourname
 ```
 
-### 2. CLI Configuration (Optional)
+Enter the new password at the prompt. There is no default login. The command
+validates password strength and refuses to overwrite an existing user. For
+noninteractive provisioning, pass `DJANGO_SUPERUSER_PASSWORD` through the process
+environment and add `--noinput`; avoid passwords in command-line arguments.
 
-The `gnss_data.cfg` file is used by the GeoDE CLI tools for GNSS processing. The web interface uses only the `.env` file, so `gnss_data.cfg` is not required for Docker deployment.
+Open `http://localhost:8080` (or your configured URL). Native administrator
+creation uses `pixi run -e web admin:create --username yourname`.
 
-If you plan to use CLI tools alongside the web interface, copy and configure it:
+## Use an external database
+
+Configure the connection settings described in [Database setup](database-setup.md).
+Omit the bundled database profile:
 
 ```bash
-cp gnss_data.cfg.example gnss_data.cfg
-# Edit gnss_data.cfg with your archive paths and settings
+docker compose up --build -d --wait
 ```
 
-### 3. Frontend Environment
+If you previously started the bundled service, stop it explicitly with
+`docker compose --profile bundled-db stop postgres`. Omitting a profile does not
+stop an already running container.
 
-The frontend uses `VITE_API_URL` from the root `.env` file. This should match the URL users will access the app at.
-
-## Deployment
-
-Build and start the containers:
+## Check and maintain
 
 ```bash
-docker compose up --build -d
+docker compose ps
+docker compose logs --tail=100 backend
+docker compose exec backend python manage.py doctor
+docker compose exec backend python manage.py changepassword yourname
 ```
 
-This starts three containers:
-- `gnss-postgres`: PostgreSQL 16 database (data persisted in a Docker named volume)
-- `gnss-backend`: Django REST API
-- `gnss-frontend`: React/Vite frontend
+The read-only doctor checks configuration, database connectivity, migrations, and
+media access without printing passwords. Readiness is available without login
+at `/api/health-check`; it returns 503 for an unavailable or unmigrated database.
+It does not monitor Celery throughput or GNSS processing jobs.
 
-## Creating the Admin User
+Use TLS at your reverse proxy for public access, set `DJANGO_HTTPS=True`, and set
+allowed hosts/CORS origins to the URLs you serve. The edge proxy must replace
+client-supplied forwarding headers and set `X-Forwarded-Proto: https`; restrict
+access to the application port to that proxy. The bundled frontend preserves
+that HTTPS indication when forwarding to Django. `VITE_API_URL` is baked into the
+frontend build; rebuild after changing it.
 
-The Django migrations create a default admin user:
-
-- **Username**: `admin`
-- **Password**: `admin`
-
-!!! warning
-    Change the default password immediately after first login!
-
-### Creating a Custom Superuser
-
-```bash
-# If using Docker:
-docker exec -it gnss-backend python /code/manage.py createsuperuser
-```
-
-You will be prompted for:
-- Username
-- Email (optional)
-- Password
-
-### Changing the Default Admin Password
-
-```bash
-docker exec -it gnss-backend python /code/manage.py changepassword admin
-```
-
-## Django Migrations
-
-Django migrations run automatically when the backend container starts. You should see output like:
-
-```
-Attempting database migrations...
-Operations to perform:
-  Apply all migrations: api, auth, contenttypes, sessions
-Running migrations:
-  ...
-Migrations complete.
-```
-
-If the database is unavailable at startup, the container will log a warning and continue running. You can manually run migrations later:
-
-```bash
-docker exec -it gnss-backend python /code/manage.py migrate
-```
-
-## API Documentation
-
-API documentation is available in OpenAPI format at `web/backend/docs/schema.yml`.
-
-To view the interactive API client:
-
-```bash
-docker run -p 8081:8080 -e SWAGGER_JSON=/schema.yml \
-  -v ${PWD}/web/backend/docs/schema.yml:/schema.yml \
-  swaggerapi/swagger-ui
-```
-
-Then open `http://localhost:8081` in your browser.
-
-## Testing
-
-Before running tests, create a test database:
-
-1. Create database named `test_{PRODUCTION_DB_NAME}`
-2. Run the schema modification script: `db/modify_test_db.py`
-3. Set test credentials in `db/.env`
-
-Run tests:
-
-```bash
-cd web/backend/
-python manage.py test --keepdb
-```
-
-## Environment Variables Reference
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `APP_PORT` | Port where app is served (default: 8080) | Yes |
-| `MEDIA_FOLDER_HOST_PATH` | Host directory for uploaded station images and files | Yes |
-| `USER_ID_TO_SAVE_FILES` | UID for file ownership (run `id -u` to find) | Yes |
-| `GROUP_ID_TO_SAVE_FILES` | GID for file ownership (run `id -g` to find) | Yes |
-| `VITE_API_URL` | URL users access the app at | Yes |
-| `POSTGRES_HOST` | Database hostname (`host.docker.internal` for local) | Yes |
-| `POSTGRES_PORT` | Database port (default: 5432) | No |
-| `POSTGRES_DB` | Database name | Yes |
-| `POSTGRES_USER` | Database username | Yes |
-| `POSTGRES_PASSWORD` | Database password | Yes |
-| `DJANGO_SECRET_KEY` | Cryptographic key for Django (generate with `python3 -c "import secrets; print(secrets.token_urlsafe(50))"`) | Yes |
-| `DJANGO_DEBUG` | Enable debug mode (default: False) | No |
+See [operations](../development/operations.md) for backups, restore rehearsal,
+and updates. Keep `.env` and uploaded media outside Git.

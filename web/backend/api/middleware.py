@@ -52,7 +52,7 @@ class DatabaseHealthCheckMiddleware:
                     }
                 ]
             },
-            status=500
+            status=503
         )
 
     def __call__(self, request):

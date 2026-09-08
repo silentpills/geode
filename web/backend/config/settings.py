@@ -84,6 +84,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
 
 if os.getenv("DJANGO_HTTPS", "False") == "True":
     SECURE_SSL_REDIRECT = True
+    SECURE_REDIRECT_EXEMPT = [r"^api/health-check$"]
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SESSION_COOKIE_SECURE = True

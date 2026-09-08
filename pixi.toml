@@ -1,9 +1,10 @@
 [workspace]
+requires-pixi = ">=0.80,<0.81"
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64"]
 
 [dependencies]
-python = ">=3.10"
+python = ">=3.13,<3.14"
 cartopy = "*"
 geopandas = "*"
 geopy = "*"
@@ -17,16 +18,16 @@ psycopg = "*"
 scikit-learn = ">=1.1"
 scipy = "*"
 tqdm = "*"
-pytest = "*"
-pytest-cov = "*"
-ruff = "*"
 xmltodict = "*"
 scikit-image = "*"
 shapely = "*"
 obspy = "*"
-pip = "*"
 
 [feature.dev.dependencies]
+pytest = "*"
+pytest-cov = "*"
+ruff = "*"
+pip = "*"
 # Type stubs for better IDE support and type checking
 types-tqdm = "*"
 types-requests = "*"
@@ -72,6 +73,9 @@ default = { features = ["dev"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
 reports = { features = ["dev", "reports"], solve-group = "default" }
 web = { features = ["dev", "web"], solve-group = "default" }
+runtime = { features = ["web"], solve-group = "default" }
+frontend = { features = ["frontend"], no-default-feature = true }
+audit = { features = ["audit"], no-default-feature = true }
 
 [feature.docs.pypi-dependencies]
 mkdocs = "*"
@@ -81,15 +85,15 @@ pymdown-extensions = "*"
 [tasks]
 # Testing
 test = { cmd = "pytest" }
-"test:api" = { cmd = "pytest geode/tests/test_antenna_api.py" }
+"test:api" = { cmd = "pytest geode/tests/test_antenna_api.py geode/tests/test_database_bootstrap.py" }
 "test:verbose" = { cmd = "pytest -v" }
 "test:cov" = { cmd = "pytest --cov=geode --cov-report=term-missing" }
 
 # Linting and formatting
-lint = { cmd = "ruff check geode com" }
-"lint:fix" = { cmd = "ruff check --fix geode com" }
-format = { cmd = "ruff format geode com" }
-"format:check" = { cmd = "ruff format --check geode com" }
+lint = { cmd = "ruff check geode com tools web/backend/api/management" }
+"lint:fix" = { cmd = "ruff check --fix geode com tools web/backend/api/management" }
+format = { cmd = "ruff format geode com tools web/backend/api/management" }
+"format:check" = { cmd = "ruff format --check geode com tools web/backend/api/management" }
 
 # Type checking
 typecheck = { cmd = "ty check --output-format github geode com" }
@@ -99,11 +103,11 @@ typecheck = { cmd = "ty check --output-format github geode com" }
 "docs:build" = { cmd = "mkdocs build" }
 
 # Pre-commit hooks
-"precommit:install" = { cmd = "pre-commit install --install-hooks" }
+"precommit:install" = { cmd = "pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg" }
 "precommit:run" = { cmd = "pre-commit run --all-files" }
 
 # All checks (useful for CI)
-check = { cmd = "ruff check geode com && ruff format --check geode com && ty check geode com && pytest" }
+check = { cmd = "ruff check geode com tools web/backend/api/management && ruff format --check geode com tools web/backend/api/management && pytest" }
 # Utilities
 # check-external = "which gfzrnx && which crx2rnx && which gpspace && which sh_gamit"
 # pgamit = "pgamit --help"
@@ -112,7 +116,7 @@ check = { cmd = "ruff check geode com && ruff format --check geode com && ty che
 # Backend/API tests use the same Django and DRF series as the backend image.
 [feature.web.pypi-dependencies]
 django = "~=5.2.11"
-djangorestframework = "~=3.15.2"
+djangorestframework = "~=3.17.2"
 djangorestframework-simplejwt = "~=5.5.1"
 django-auditlog = "==3.0.0"
 django-filter = "==24.2"
@@ -122,3 +126,28 @@ drf-spectacular = "==0.28.0"
 drf-standardized-errors = "==0.13.0"
 celery = "~=5.5.0"
 redis = "~=5.2.0"
+
+# Explicit backend runtime imports, shared by Docker and the web test environment.
+gunicorn = ">=23,<24"
+argon2-cffi = ">=23.1"
+lxml = ">=5"
+
+[feature.frontend.dependencies]
+nodejs = "22.*"
+
+[feature.frontend.tasks]
+"frontend:install" = { cmd = "npm ci", cwd = "web/frontend" }
+"frontend:build" = { cmd = "npm run build", cwd = "web/frontend", depends-on = ["frontend:install"] }
+"frontend:lint" = { cmd = "npm run lint", cwd = "web/frontend", depends-on = ["frontend:install"] }
+
+[feature.audit.dependencies]
+python = ">=3.13,<3.14"
+
+[feature.audit.pypi-dependencies]
+pip-audit = ">=2.9,<3"
+
+[feature.web.tasks]
+"db:migrate" = "python web/backend/manage.py migrate --noinput"
+"db:check" = "python web/backend/manage.py makemigrations --check --dry-run"
+"admin:create" = "python web/backend/manage.py createadmin"
+"doctor" = "python web/backend/manage.py doctor"

@@ -124,6 +124,36 @@ def test_admin_readiness_and_backup(postgres_connection, tmp_path):
     assert duplicate.returncode != 0
     probe = "from django.test import Client; assert Client().get('/api/health-check', HTTP_HOST='localhost').status_code == {}"
     manage(cnn, "shell", "-c", probe.format(200))
+    manage(cnn, "shell", "-c", probe.format(200), env={"DJANGO_HTTPS": "True"})
+    # The readiness view must be reachable without opening an ATOMIC_REQUESTS
+    # transaction first, so it can report a dead database as 503 instead of 500.
+    unavailable = (
+        "from django.test import Client; from django.db import connection; "
+        "connection.close(); connection.settings_dict['HOST'] = '/no-geode-database'; "
+        "connection.settings_dict['OPTIONS']['connect_timeout'] = 1; "
+        "assert Client().get('/api/health-check', HTTP_HOST='localhost').status_code == 503"
+    )
+    manage(cnn, "shell", "-c", unavailable)
+    manage(cnn, "wait_for_database", "--timeout", "0")
+    waiting = manage(
+        cnn,
+        "wait_for_database",
+        "--timeout",
+        "0",
+        check=False,
+        env={"POSTGRES_HOST": "/no-geode-database"},
+    )
+    assert waiting.returncode != 0
+    doctor = (
+        "from django.conf import settings; from django.core.management import call_command; "
+        f"settings.MEDIA_ROOT = {str(tmp_path)!r}; call_command('doctor')"
+    )
+    checked = manage(
+        cnn, "shell", "-c", doctor, env={"POSTGRES_PASSWORD": "doctor-test-password"}
+    )
+    assert "Configuration checks passed" in checked.stdout
+    assert "doctor-test-password" not in checked.stdout + checked.stderr
+
     cnn.execute(
         "DELETE FROM django_migrations WHERE app='api' AND name='0037_reconcile_processing_state'"
     )

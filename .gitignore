@@ -160,3 +160,9 @@ web/backend/update_gaps_status_client/__pycache__
 # General Logs
 logs
 *.log
+
+# Local deployment data and recovery artifacts
+/var/
+/backups/
+
+/web/backend/cache/

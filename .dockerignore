@@ -13,3 +13,7 @@ site
 dist
 build
 *.egg-info
+
+var
+backups
+web/backend/cache
