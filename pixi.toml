@@ -55,6 +55,8 @@ munch = "*"
 pycos = "*"
 simplekml = "*"
 usgs-libcomcat = "*"
+legacy-cgi = ">=2.6.4, <3"
+python-dotenv = ">=1.0.0"
 
 [environments]
 # Default environment includes dev features for local development

@@ -6,9 +6,14 @@
 # Clone and setup
 git clone <repo-url>
 cd geode
-pixi install              # Installs everything including dev dependencies
+pixi install --locked     # Reproduce the committed development environment
 pixi run precommit:install  # Setup git hooks (recommended!)
 ```
+
+Pixi keeps this repository's environments in `.pixi/envs/`; no separate uv or
+virtualenv setup is needed. Run tools through `pixi run` so they use the locked
+Python and dependencies. Python 3.13+ uses `legacy-cgi` for the existing Dispy
+monitoring server until the planned Celery migration replaces Dispy.
 
 ## 📦 Pixi Environments
 
