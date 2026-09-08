@@ -2458,3 +2458,37 @@ ALTER TABLE ONLY public.etm_params
 
 \unrestrict Zot5bNYrvMs94fLUzgQqVtkXVvjE9OLJCMKL9fzQcyoREdshKOKYeYg3c2LaAx4
 
+
+-- Additive processing diagnostics (also applied by Django migration 0034).
+CREATE TABLE IF NOT EXISTS public.ppp_antenna_residuals (
+                network_code    VARCHAR(3)  NOT NULL,
+                station_code    VARCHAR(4)  NOT NULL,
+                reference_frame VARCHAR(20) NOT NULL,
+                system          CHARACTER(1),
+                year            SMALLINT NOT NULL,
+                doy             SMALLINT NOT NULL,
+                antenna_code    VARCHAR(22) NOT NULL,
+                radome_code     VARCHAR(7)  NOT NULL,
+                residuals       DOUBLE PRECISION[91],  -- elevation-dependent residuals, index 1=0deg to 91=90deg
+                CONSTRAINT ppp_antenna_residuals_pkey
+                    PRIMARY KEY (network_code, station_code, year, doy, reference_frame),
+                FOREIGN KEY (network_code, station_code)
+                    REFERENCES public.stations("NetworkCode", "StationCode")
+                    ON DELETE CASCADE,
+                FOREIGN KEY (network_code, station_code, year, doy, reference_frame)
+                    REFERENCES public.ppp_soln("NetworkCode", "StationCode", "Year", "DOY", "ReferenceFrame")
+                    ON DELETE CASCADE
+            ) WITH (
+                autovacuum_enabled = TRUE);
+
+CREATE INDEX IF NOT EXISTS idx_ppp_antenna_residuals_station ON public.ppp_antenna_residuals(network_code, station_code);
+
+CREATE INDEX IF NOT EXISTS idx_ppp_antenna_residuals_date ON public.ppp_antenna_residuals(year, doy);
+
+CREATE INDEX IF NOT EXISTS idx_ppp_antenna_residuals_antenna ON public.ppp_antenna_residuals(antenna_code, radome_code);
+
+CREATE INDEX IF NOT EXISTS events_event_date_index
+                     ON public.events ("EventDate");
+
+CREATE INDEX IF NOT EXISTS stacks_name_index
+                     ON public.stacks (name);

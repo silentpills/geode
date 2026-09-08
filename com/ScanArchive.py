@@ -43,6 +43,7 @@ from geode import (
     pyRinex,
     pyRinexName,
 )
+from geode.metadata import station_info
 from geode.metadata.station_info import (
     StationInfo,
     StationInfoException,
@@ -61,7 +62,7 @@ from geode.Utils import (
 
 error_message = False
 
-ERRORS_LOG = "errors_pyScanArchive.log"
+ERRORS_LOG = "errors_ScanArchive.log"
 
 
 class Encoder(json.JSONEncoder):
@@ -517,10 +518,12 @@ def insert_stninfo(NetworkCode, StationCode, stninfofile):
         )
 
     try:
-        stnInfo = StationInfo(cnn, NetworkCode, StationCode, allow_empty=True)
+        stnInfo = station_info.StationInfo(
+            cnn, NetworkCode, StationCode, allow_empty=True
+        )
         stninfo = stnInfo.parse_station_info(stninfofile)
 
-    except StationInfoException:
+    except station_info.StationInfoException:
         return (
             traceback.format_exc()
             + " insert_stninfo: "
@@ -540,9 +543,11 @@ def insert_stninfo(NetworkCode, StationCode, stninfofile):
         if stn.get("StationCode").lower() == StationCode:
             try:
                 # call station info again in case there was a change from other records
-                stnobj = StationInfo(cnn, NetworkCode, StationCode, allow_empty=True)
+                stnobj = station_info.StationInfo(
+                    cnn, NetworkCode, StationCode, allow_empty=True
+                )
                 stnobj.insert_station_info(stn)
-            except StationInfoException as e:
+            except station_info.StationInfoException as e:
                 errors.append(str(e))
 
             except:
@@ -667,7 +672,7 @@ def execute_ppp(record, rinex_path, h_tolerance):
                     cnn.close()
                     return
 
-                stninfo = StationInfo(
+                stninfo = station_info.StationInfo(
                     cnn, NetworkCode, StationCode, Rinex.date, h_tolerance=h_tolerance
                 )
 
@@ -703,6 +708,32 @@ def execute_ppp(record, rinex_path, h_tolerance):
 
                         # insert record in DB
                         cnn.insert("ppp_soln", **ppp.record)
+
+                        if ppp.elevation_residuals is not None:
+                            try:
+                                cnn.insert(
+                                    "ppp_antenna_residuals",
+                                    network_code=NetworkCode,
+                                    station_code=StationCode,
+                                    reference_frame=ppp.record["ReferenceFrame"],
+                                    year=int(year),
+                                    doy=int(doy),
+                                    antenna_code=stninfo.current_record.AntennaCode.strip(),
+                                    radome_code=stninfo.current_record.RadomeCode.strip(),
+                                    residuals=ppp.elevation_residuals.tolist(),
+                                )
+                            except Exception as e:
+                                event = pyEvents.Event(
+                                    Description="Failed to insert PPP antenna residuals: %s"
+                                    % str(e),
+                                    NetworkCode=NetworkCode,
+                                    StationCode=StationCode,
+                                    EventType="warn",
+                                    Year=int(year),
+                                    DOY=int(doy),
+                                )
+                                cnn.insert_event(event)
+
                         # DDG: Eric's request to generate a date of PPP solution
                         event = pyEvents.Event(
                             Description="A new PPP solution was created for frame "
@@ -721,7 +752,7 @@ def execute_ppp(record, rinex_path, h_tolerance):
         pyRinex.pyRinexExceptionBadFile,
         pyRinex.pyRinexExceptionSingleEpoch,
         pyPPP.pyRunPPPException,
-        StationInfoException,
+        station_info.StationInfoException,
     ) as e:
         e.event["StationCode"] = StationCode
         e.event["NetworkCode"] = NetworkCode
@@ -1117,6 +1148,7 @@ def process_ppp(
         "geode.pyOptions",
         "geode.pyEvents",
         "geode.Utils",
+        "numpy",
     )
 
     depfuncs = (remove_from_archive, verify_rinex_date_multiday)

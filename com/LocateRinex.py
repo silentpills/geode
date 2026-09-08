@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 
+import numpy
+
 # app
 from geode import dbConnection, pyOptions, pyOTL, pyPPP, pyProducts, pyRinex
 from geode.Utils import add_version_argument, file_readlines
@@ -156,6 +158,15 @@ def main():
     )
 
     parser.add_argument(
+        "-res",
+        "--residuals",
+        action="store_true",
+        default=False,
+        help="Save elevation-dependent phase residuals to [station]_[doy]_residuals.txt "
+        "in the current working directory. Uses BWD epochs if available, otherwise FWD.",
+    )
+
+    parser.add_argument(
         "-nocfg",
         "--no_config_file",
         type=str,
@@ -242,6 +253,7 @@ def main():
                         args.backward_substitution,
                         args.elevation_mask,
                         args.code_only,
+                        args.residuals,
                     )
 
         except pyRinex.pyRinexException as e:
@@ -266,6 +278,7 @@ def execute_ppp(
     backward_substitution=False,
     elevation_mask=5,
     code_only=False,
+    save_residuals=False,
 ):
     # put the correct APR coordinates in the header.
     # stninfo = pyStationInfo.StationInfo(None, allow_empty=True)
@@ -371,6 +384,20 @@ def execute_ppp(
         )
 
         ppp.exec_ppp()
+
+        if save_residuals and ppp.elevation_residuals is not None:
+            fname = "%s_%i_%03i_residuals.txt" % (
+                stnm,
+                rinexinfo.date.year,
+                rinexinfo.date.doy,
+            )
+            numpy.savetxt(
+                fname,
+                numpy.column_stack((ppp.elevation_bins, ppp.elevation_residuals)),
+                fmt=["%3i", "%14.6f"],
+                header="elev_deg  mean_vcp_mm",
+            )
+            print("Residuals saved to %s" % fname)
 
         if not ppp.check_phase_center(ppp.proc_parameters):
             print("WARNING: phase center parameters not found for declared antenna!")

@@ -182,3 +182,20 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO geode;
 1. Check PostgreSQL is listening on the correct interface
 2. Verify `pg_hba.conf` allows your connection
 3. Test with: `psql -h hostname -U geode -d geode`
+
+## Processing diagnostics update
+
+This fork adds `ppp_antenna_residuals` and indexes on `events("EventDate")` and
+`stacks(name)`. Fresh SQL installs include them in `database/schema.sql`;
+Django migration `0034_processing_diagnostics` adds them to web deployments.
+The CLI connection's existing migration routine also creates them when needed.
+The operations tolerate an existing installation from either path.
+
+PPP runs store 91 elevation bins (0–90 degrees) when a residual file is available.
+They prefer backward-substitution observations and fall back to forward results.
+Deleting a PPP solution also deletes its residual row. `LocateRinex` can export
+these diagnostics; no residual row is required for older solutions.
+
+The upstream antenna/radome primary-key redesign, project tables, and
+reference-frame management tables are not part of this update. Existing Django
+models, psycopg3 access, and `.env` database configuration remain authoritative.

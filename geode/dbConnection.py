@@ -266,6 +266,78 @@ def run_db_migrations(cnn: "Cnn"):
                 """)
         cnn.commit_transac()
 
+    ##################################################################
+    # ppp_antenna_residuals for storing the residual values after PPP processing
+
+    antenna_residuals = cnn.query_float(
+        """
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = 'ppp_antenna_residuals');
+        """,
+        as_dict=True,
+    )
+
+    if not antenna_residuals[0]["exists"]:
+        cnn.begin_transac()
+        cnn.query("""
+            CREATE TABLE ppp_antenna_residuals (
+                network_code    VARCHAR(3)  NOT NULL,
+                station_code    VARCHAR(4)  NOT NULL,
+                reference_frame VARCHAR(20) NOT NULL,
+                system          CHARACTER(1),
+                year            SMALLINT NOT NULL,
+                doy             SMALLINT NOT NULL,
+                antenna_code    VARCHAR(22) NOT NULL,
+                radome_code     VARCHAR(7)  NOT NULL,
+                residuals       DOUBLE PRECISION[91],  -- elevation-dependent residuals, index 1=0deg to 91=90deg
+                CONSTRAINT ppp_antenna_residuals_pkey
+                    PRIMARY KEY (network_code, station_code, year, doy, reference_frame),
+                FOREIGN KEY (network_code, station_code)
+                    REFERENCES stations("NetworkCode", "StationCode")
+                    ON DELETE CASCADE,
+                FOREIGN KEY (network_code, station_code, year, doy, reference_frame)
+                    REFERENCES ppp_soln("NetworkCode", "StationCode", "Year", "DOY", "ReferenceFrame")
+                    ON DELETE CASCADE
+            ) WITH (
+                autovacuum_enabled = TRUE);
+            CREATE INDEX idx_ppp_antenna_residuals_station ON ppp_antenna_residuals(network_code, station_code);
+            CREATE INDEX idx_ppp_antenna_residuals_date ON ppp_antenna_residuals(year, doy);
+            CREATE INDEX idx_ppp_antenna_residuals_antenna ON ppp_antenna_residuals(antenna_code, radome_code);
+                """)
+        cnn.commit_transac()
+
+    ##################################################################
+    # Index events(EventDate) and stacks(name): both are queried/filtered
+    # on these columns often enough (event log lookups, stack name lookups)
+    # to be worth an index.
+    # NOTE: CREATE INDEX CONCURRENTLY cannot run inside a transaction block,
+    # so these are intentionally NOT wrapped in begin_transac()/commit_transac()
+    # -- the connection already runs with autocommit=True. The pg_indexes
+    # check plus the SQL-level IF NOT EXISTS both guard against re-creating
+    # an index that already exists.
+
+    idx = cnn.query(
+        "SELECT * FROM pg_indexes WHERE tablename = 'events' "
+        "AND indexname = 'events_event_date_index'"
+    )
+
+    if not len(idx):
+        print(' >> Creating index events_event_date_index on events("EventDate")')
+        cnn.query("""CREATE INDEX CONCURRENTLY IF NOT EXISTS events_event_date_index
+                     ON events ("EventDate");""")
+
+    idx = cnn.query(
+        "SELECT * FROM pg_indexes WHERE tablename = 'stacks' "
+        "AND indexname = 'stacks_name_index'"
+    )
+
+    if not len(idx):
+        print(" >> Creating index stacks_name_index on stacks(name)")
+        cnn.query("""CREATE INDEX CONCURRENTLY IF NOT EXISTS stacks_name_index
+                     ON stacks (name);""")
+
 
 class FloatLoader(Loader):
     """Load PostgreSQL numeric as Python float instead of Decimal."""
