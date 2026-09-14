@@ -76,8 +76,10 @@ dependencies = [
 reports = ["pillow>=9.0", "staticmap>=0.5.7", "weasyprint>=60.0"]
 
 [project.urls]
-"Homepage" = "https://github.com/demiangomez/geode"
-"Bug Tracker" = "https://github.com/demiangomez/geode/issues"
+"Homepage" = "https://github.com/silentpills/geode"
+"Bug Tracker" = "https://github.com/silentpills/geode/issues"
+"Documentation" = "https://github.com/silentpills/geode/blob/dev/docs/index.md"
+"Upstream" = "https://github.com/demiangomez/geode"
 
 [tool.setuptools.packages.find]
 where = ["."]

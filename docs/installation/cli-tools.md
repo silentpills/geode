@@ -1,155 +1,46 @@
-# CLI Tools Setup
+# CLI tools setup
 
-This guide covers configuring and running GeoDE command-line tools for GNSS processing.
+Complete the [installation](index.md) and [database setup](database-setup.md)
+first. Pixi installs this checkout as an editable package in `.pixi/envs/default`.
+Run commands from the repository root through `pixi run --locked`.
 
-## Installation
+## Processing configuration
 
-Use this fork's `dev` checkout for both development and deployment:
+Copy `gnss_data.cfg.example` to `gnss_data.cfg` and set the archive, incoming-data
+repository, orbit products, external executables, and compute nodes for your
+installation. Commands normally look for this file in the working directory.
+Database credentials belong in `.env` and override legacy `[postgres]` fields.
+The [configuration reference](../reference/configuration.md) describes each
+section; keep the example file as the starting template.
 
-```bash
-git clone --branch dev https://github.com/silentpills/geode.git
-cd geode
-pixi install --locked
-```
+CLI processing and the web application must connect to the same database.
+External processing programs must be installed on the machines that run jobs,
+with access to the configured data and database. Processing still uses Dispy;
+Celery migration is a proposal. The `legacy-cgi` dependency supports the current
+Dispy monitoring server on Python 3.13.
 
-Pixi installs the local source as an editable package in `.pixi/envs/default`.
-Use `pixi run python -m com.<Tool>` from the repository root. This fork is installed from source and is not published to PyPI.
+## Run a command
 
-## Configuration File
-
-Copy the example configuration file to your working directory and customize it:
-
-```bash
-cp gnss_data.cfg.example gnss_data.cfg
-# Set database credentials in .env; set processing paths in gnss_data.cfg
-```
-
-Database credentials belong in `.env` (`POSTGRES_HOST`, `POSTGRES_PORT`,
-`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`). They take precedence over
-legacy `[postgres]` credentials. Keep processing paths in `gnss_data.cfg`.
-GeoDE commands normally look for that file in the current working directory.
-
-### Configuration Sections
-
-```ini
-[postgres]
-# Legacy database fields may be omitted when using .env.
-
-# Directory for format scripts (data download processing)
-format_scripts_path = /path/to/format_scripts
-
-[archive]
-# Absolute location of the RINEX tank
-path = /path/to/archive
-repository = /path/to/repository
-
-# Orbit file locations (use $year, $doy, $gpsweek, $gpswkday variables)
-ionex = /path/to/orbits/ionex/$year
-brdc = /path/to/orbits/brdc/$year
-sp3 = /path/to/orbits/sp3/$gpsweek
-
-# Hostnames for parallel processing nodes
-node_list = node1,node2,node3
-
-# Orbit center type precedence (AC=Analysis Center, CS=campaign, ST=solution type)
-sp3_ac = COD,IGS
-sp3_cs = OPS,R03,MGX
-sp3_st = FIN,SNX,RAP
-
-[otl]
-# Ocean tide loading configuration
-grdtab = /path/to/gamit/bin/grdtab
-otlgrid = /path/to/gamit/tables/otl.grid
-otlmodel = FES2014b
-
-[ppp]
-# PPP processing configuration
-ppp_path = /path/to/PPP_NRCAN
-ppp_exe = /path/to/PPP_NRCAN/source/ppp
-institution = Your Institution
-info = Your Group Name
-
-# Reference frames (comma-separated list)
-frames = IGS20,
-IGS20 = 1987_1,
-
-# ATX files (same order as frames)
-atx = /path/to/resources/atx/igs20_2335_plus.atx
-```
-
-## Running Commands
-
-Once configured, run GeoDE from the repository root:
+Inspect help before starting a workflow:
 
 ```bash
-# Plot ETM for a station
-pixi run python -m com.PlotETM igm1
-
-# Scan archive for RINEX files
-pixi run python -m com.ScanArchive igs.all -rinex 1
-
-# Download data for stations
-pixi run python -m com.DownloadSources rms.all -date 2024.001 2024.365
-
-# Run archive service
-pixi run python -m com.ArchiveService
+pixi run --locked python -m com.PlotETM --help
+pixi run --locked python -m com.ScanArchive --help
+pixi run --locked python -m com.IntegrityCheck --help
 ```
 
-## Station List Syntax
+Use `python -m com.<Tool>` for any CLI module with a main entry point. Some tools
+also have installed entry points, such as `pixi run --locked PlotETM.py --help`;
+the module form does not depend on an entry-point alias.
 
-Most commands accept a station list argument with flexible syntax:
-
-| Format | Description |
-|--------|-------------|
-| `stnm` | Single station (all networks) |
-| `net.stnm` | Station in specific network |
-| `net.all` | All stations in network |
-| `all` | All stations in database |
-| `ARG` | All stations in country (3-letter ISO code) |
-| `*net.stnm` | Exclude station from list |
-| `ars.at1[3-5]` | Regex range (at13, at14, at15) |
-| `ars.at%` | Wildcard (any string) |
-
-## Common Workflows
-
-### Adding RINEX to Database
+After configuring the intended database, plot a station's time series:
 
 ```bash
-# Scan archive and add RINEX files
-pixi run python -m com.ScanArchive net.all -rinex 0
-
-# Or scan everything (ignore station list)
-pixi run python -m com.ScanArchive net.all -rinex 1
+pixi run --locked python -m com.PlotETM net.station -gui
 ```
 
-### Running PPP
-
-```bash
-# Run PPP for date range
-pixi run python -m com.ScanArchive net.all -ppp 2024.001 2024.100
-```
-
-### Plotting Time Series
-
-```bash
-# Interactive plot
-pixi run python -m com.PlotETM station_code -gui
-
-# Save to directory
-pixi run python -m com.PlotETM net.all -dir /path/to/output
-```
-
-### Downloading Data
-
-```bash
-# Download for last 30 days
-pixi run python -m com.DownloadSources net.all -win 30
-
-# Download specific date range
-pixi run python -m com.DownloadSources net.all -date 2024/01/01 2024/12/31
-```
-
-## Next Steps
-
-- See [CLI Reference](../usage/cli-reference.md) for detailed command documentation
-- See [Configuration](../reference/configuration.md) for all configuration options
+See the [processing workflow](../usage/processing-workflow.md) for download,
+ingestion, PPP, and integrity review. The [CLI reference](../usage/cli-reference.md)
+owns station selectors and command options; the
+[antenna catalog guide](../usage/antenna-catalog.md) covers required equipment
+identities before importing station history.

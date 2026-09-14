@@ -1,6 +1,11 @@
 # CLI Reference
 
-This page documents the command-line interface tools available in GeoDE.
+This page documents the main command-line tools available in GeoDE. Run examples
+from the checkout with `pixi run --locked python -m com.<Tool>`. Some tools
+also have installed `.py` entry points. Use a tool's
+`--help` for its complete interface. The
+[processing workflow](processing-workflow.md) explains data flow and repair
+boundaries.
 
 ## Station List Syntax
 
@@ -21,7 +26,27 @@ Most commands accept a station list argument with the following syntax:
 - `|` - OR operator (e.g., `ars.at1[1|2]` matches at11 and at12)
 - `_` - Single character wildcard (equivalent to POSIX `?`)
 
-A file with station list can also be provided (using same conventions). In files, `*` can be replaced with `-` for clarity.
+A file path containing station specifications can also be provided, one per line
+(without an `@` prefix). In files, `*` can be replaced with `-` for exclusions.
+Quote shell arguments containing `*`, brackets, or `|` to prevent shell expansion.
+
+### Station type and geographic filters
+
+Station type filters require the web tables `api_stationtype` and
+`api_stationmeta`. Geographic filters use station coordinates or plate metadata.
+Combine filters with `:`:
+
+| Selection | Meaning |
+| --- | --- |
+| `ARG:CONTINUOUS` | Continuous stations in Argentina |
+| `all:CONTINUOUS` | Continuous stations in all countries |
+| `ARG:LAT[-35,-40]` | Latitude range |
+| `CHL:LON[-72,-70]` | Longitude range |
+| `ARG:BBOX[-30,-40,-70,-60]` | Latitude/longitude bounds |
+| `ARG:PLATE[SC]` | Stations with the Scotia plate code |
+| `ARG:CAMPAIGN:RADIUS[-35.5,-65.2,500]` | Campaign stations within 500 km of the center |
+
+For example: `pixi run --locked python -m com.PlotETM 'ARG:LAT[-35,-40]' -gui`.
 
 ---
 
@@ -42,12 +67,13 @@ Archive operations service.
 
 | Argument | Description |
 |----------|-------------|
-| `-purge`, `--purge_locks` | Delete networks starting with '?' and purge locks table |
+| `-purge`, `--purge_locks` | Delete temporary networks starting with '?', locks, and associated files in `data_in` |
+| `-visits`, `--process_visits` | Check and convert GNSS visit files to RINEX |
 | `-np`, `--noparallel` | Execute without parallelization |
 
 **Usage:**
 ```bash
-ArchiveService.py [options]
+pixi run --locked python -m com.ArchiveService [options]
 ```
 
 ---
@@ -98,8 +124,8 @@ Download RINEX data from configured sources.
 
 **Usage:**
 ```bash
-DownloadSources.py net.all -date 2024.001 2024.100
-DownloadSources.py net.all -win 30
+pixi run --locked python -m com.DownloadSources net.all -date 2024/01/01 2024/04/09
+pixi run --locked python -m com.DownloadSources net.all -win 30
 ```
 
 ---
@@ -117,8 +143,8 @@ Archive operations for RINEX scanning, PPP processing, and station management.
 | `-otl` | Calculate ocean loading coefficients (FES2004) |
 | `-stninfo [file] [net]` | Insert station information |
 | `-export [dataless]` | Export station to zip file |
-| `-import [file] [net]` | Import station from zip file |
-| `-get` | Get station from archive to current directory |
+| `-import net zipfiles...` | Import station ZIP files into the default network when needed |
+| `-get date` | Copy a station observation from the archive, normalizing its header |
 | `-ppp [start] [end]` | Run PPP on RINEX files |
 | `-rehash` | Rehash PPP solutions |
 | `-tol {hours}` | Station info gap tolerance (default: 0) |
@@ -126,14 +152,45 @@ Archive operations for RINEX scanning, PPP processing, and station management.
 **Usage:**
 ```bash
 # Scan and add RINEX to database
-ScanArchive.py net.all -rinex 0
+pixi run --locked python -m com.ScanArchive net.all -rinex 0
 
 # Run PPP for date range
-ScanArchive.py net.all -ppp 2024.001 2024.100
+pixi run --locked python -m com.ScanArchive net.all -ppp 2024/01/01 2024/04/09
 
-# Export station
-ScanArchive.py net.stnm -export true
+# Export station metadata without observation files
+pixi run --locked python -m com.ScanArchive net.stnm -export true
 ```
+
+---
+
+## IntegrityCheck.py
+
+Inspect archive/database consistency, metadata, and PPP solutions. Report modes
+and a review workflow are described in
+[processing and integrity checks](processing-workflow.md#review-integrity-before-repairs).
+
+| Option | Effect |
+| --- | --- |
+| `-d start [end]` | Bound operations by date; `-stnc` ignores this filter |
+| `-rinex report` | Report archive files missing for database records |
+| `-rinex fix` | Remove missing-file records and associated PPP/GAMIT solutions |
+| `-rnx_count` | Count unique station-days per day |
+| `-stnc` | Check equipment-history consistency and observation coverage |
+| `-stnr` | Compare receiver serial numbers with RINEX metadata |
+| `-stns` | Check PPP hashes against station-info hashes |
+| `-stnp [days]` | Output proposed station.info; ignore records no longer than the specified days |
+| `-g [days]`, `-gg` | Report gaps or show them graphically |
+| `-sc noop` | Report spatial-coherence problems |
+| `-sc exclude`, `-sc delete` | Exclude or delete PPP solutions with coherence problems |
+| `-print short`, `-print long` | Output station.info |
+| `-r net.station` | Rename/merge one source station and its archive files into the destination |
+| `-del_stn` | With `-r`, delete the source station if it becomes empty |
+| `-es start end` | Exclude PPP solutions in a date range |
+| `-del start end completion` | Delete RINEX and associated solutions at or below the completion threshold |
+| `-np` | Execute without parallelization |
+
+Inspect help and back up affected data before mutation operations. For date
+examples, use explicit calendar dates such as `2024/01/01 2024/12/31`.
 
 ---
 
@@ -171,14 +228,14 @@ Plot Extended Trajectory Model (ETM) for stations.
 **Usage:**
 ```bash
 # Interactive plot
-PlotETM.py station -gui
+pixi run --locked python -m com.PlotETM station -gui
 
 # Save all stations to directory
-PlotETM.py net.all -dir /output/path
+pixi run --locked python -m com.PlotETM net.all -dir /output/path
 
 # Plot GAMIT time series
-PlotETM.py station -gamit stack_name
+pixi run --locked python -m com.PlotETM station -gamit stack_name
 
 # Query model at specific dates
-PlotETM.py station -q model -win 2024/01/01 2024/12/31
+pixi run --locked python -m com.PlotETM station -q model -win 2024/01/01 2024/12/31
 ```

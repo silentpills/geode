@@ -1,70 +1,75 @@
-# Installation Overview
+# Installation
 
-This fork uses Pixi 0.80.0 with Python 3.13 and PostgreSQL 18. External processing tools depend on the workloads you run.
+Develop and deploy from this fork's `dev` branch. `main` is an upstream mirror.
+Use Pixi 0.80.0, matching CI and Docker, with the committed Python 3.13 and
+PostgreSQL 18 environments. This fork is installed from source and does not
+publish to PyPI.
 
-## Prerequisites
-
-Before installing GeoDE, ensure you have the following external dependencies. Some of these require licenses or specific academic access.
-
-| Dependency | Source | Notes |
-|------------|--------|-------|
-| **GAMIT/GLOBK** | [MIT](http://www-gpsg.mit.edu/gg/) | Requires academic license |
-| **GFZRNX** | [GFZ Potsdam](https://gnss.gfz-potsdam.de/services/gfzrnx) | Mac users: allow unsigned software in System Settings |
-| **RNX2CRX / CRX2RNX** | [GSI Japan](https://terras.gsi.go.jp/ja/crx2rnx.html) | Often included with GAMIT |
-| **GPSPACE** | [GitHub](https://github.com/demiangomez/GPSPACE) | Fork of lahayef/GPSPACE |
-
-!!! important
-    These programs must be installed and available in your PATH. You can verify installation by running `which <program>`. For example:
-    ```bash
-    which crx2rnx
-    # Should return something like: /home/user/gg/gamit/bin/crx2rnx
-    ```
-
-## Installation Methods
-
-### As a Python Package
-
-For time series analysis and library usage:
+## Checkout and configuration
 
 ```bash
 git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
 pixi install --locked
+cp .env.example .env
+cp gnss_data.cfg.example gnss_data.cfg
 ```
 
-This installs Python libraries and PostgreSQL development tools in the repository. Initialize your database separately using the migration command in the database setup guide.
+Environments live in `.pixi/envs/`; no separate virtual environment is needed.
+Configure database credentials in `.env` and processing paths in `gnss_data.cfg`.
+See the [configuration reference](../reference/configuration.md).
 
-### Development Environment with Pixi
+## Native installation
 
-We recommend using [Pixi](https://prefix.dev/) to manage the Python environment and dependencies.
+Create an empty PostgreSQL database owned by your GeoDE user, configure `.env`,
+then initialize it and create an administrator explicitly:
 
-1. **Clone the repository:**
-    ```bash
-    git clone --branch dev https://github.com/silentpills/geode.git
-    cd geode
-    ```
+```bash
+pixi install --locked -e web
+pixi run --locked -e web db:migrate
+pixi run --locked -e web db:check
+pixi run --locked -e web admin:create --username yourname
+```
 
-2. **Install dependencies:**
-    ```bash
-    pixi install --locked
-    ```
+CLI processing and the web application share this database. There are no default
+login accounts. Follow [database setup](database-setup.md) for existing databases
+and [CLI setup](cli-tools.md) for processing configuration and commands.
 
-3. **Activate the shell:**
-    ```bash
-    pixi shell
-    ```
+## Docker installation
 
-## Complete Setup Order
+Configure `.env` and create the writable media folder as described in the
+[web setup guide](web-interface.md), then start with bundled PostgreSQL:
 
-For a full GeoDE installation with database and web interface:
+```bash
+docker compose --profile bundled-db up --build -d --wait
+docker compose exec backend python manage.py createadmin --username yourname
+```
 
-1. **Install prerequisites** (GAMIT, GFZRNX, etc.)
-2. **Set up PostgreSQL database** - See [Database Setup](database-setup.md)
-3. **Configure GeoDE** - See [CLI Tools](cli-tools.md)
-4. **Deploy web interface** (optional) - See [Web Interface](web-interface.md)
+Docker runs the same database initialization command and builds both the backend
+and processing library from this checkout and lock. For an external database,
+omit the bundled profile and configure the container connection separately from
+the native connection.
 
-## Next Steps
+To build the backend alone, run
+`docker build -f web/backend/Dockerfile -t gnss-backend .` from the repository root.
+The build context excludes credentials, local environments, and uploaded media.
+Package metadata uses the source-archive fallback version `0.0.0`; record the Git
+commit when deploying. See [operations](../development/operations.md) for backups,
+restore rehearsal, and updates.
 
-- [Database Setup](database-setup.md) - Set up PostgreSQL with the GeoDE schema
-- [CLI Tools](cli-tools.md) - Configure and run command-line tools
-- [Web Interface](web-interface.md) - Deploy the Django/React web interface
+## External processing tools
+
+Install the tools needed by your workload separately and make their executables
+available through the configured paths. Basic web development and repository
+tests do not require these programs.
+
+| Tool | Source |
+| --- | --- |
+| GAMIT/GLOBK | [MIT](http://www-gpsg.mit.edu/gg/) |
+| GFZRNX | [GFZ Potsdam](https://gnss.gfz-potsdam.de/services/gfzrnx) |
+| RNX2CRX / CRX2RNX | [GSI Japan](https://terras.gsi.go.jp/ja/crx2rnx.html) |
+| GPSPACE | [GitHub](https://github.com/demiangomez/GPSPACE) |
+
+Historical institutional installers in `scripts/legacy/` are not supported setup
+paths. For repository development, use the
+[development workflow](../development/contributing.md).

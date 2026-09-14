@@ -33,7 +33,12 @@ pixi install --locked
 pixi shell
 ```
 
-See the [Installation Guide](installation/index.md) for detailed setup instructions.
+This fork develops and deploys from `dev`; `main` mirrors upstream. See the
+[installation guide](installation/index.md) for native and Docker setup,
+[processing workflow](usage/processing-workflow.md) for data handling, and
+[development workflow](development/contributing.md) for checks. The
+[upstream integration record](development/upstream-integration.md) explains
+retained scientific defaults and selected upstream changes.
 
 ## Components
 
@@ -48,4 +53,7 @@ BSD-3-Clause
 
 ## Citation
 
-See [CITATION.cff](https://github.com/demiangomez/Parallel.GAMIT/blob/main/CITATION.cff) for citation information.
+Cite the upstream GeoDE project and record the fork revision used in the analysis:
+
+> Gomez, D.D., et al. (2024). GeoDE: Geodesy Database Engine for automated GNSS
+> processing and analysis. [GitHub repository](https://github.com/demiangomez/geode).

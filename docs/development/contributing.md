@@ -18,14 +18,19 @@ do not create another uv/venv environment. `default` includes processing and dev
 tools; `web` adds Django tests; `runtime` contains the production backend without
 dev tools; `reports`, `docs`, `frontend`, and `audit` cover their named tasks.
 
-## Required checks
+## Verification
+
+Run checks relevant to the files and behavior changed. CI runs the full set
+below; documentation-only changes need the strict documentation build. Use
+`pixi run --locked test path/to/test.py` for a focused processing test while
+developing, then run the relevant suite before committing.
 
 ```bash
-pixi run check
-pixi run -e web test:api
-pixi run -e reports test geode/tests/test_reports.py
-pixi run -e docs docs:build --strict
-pixi run -e frontend frontend:build
+pixi run --locked check
+pixi run --locked -e web test:api
+pixi run --locked -e reports test geode/tests/test_reports.py
+pixi run --locked -e docs docs:build --strict
+pixi run --locked -e frontend frontend:build
 ```
 
 The API task starts isolated PostgreSQL clusters using Pixi's dev tools. It tests
@@ -35,10 +40,11 @@ and the historical Django suite. It does not connect to your configured database
 Run these database tests as an unprivileged user because PostgreSQL refuses to
 initialize a server as root.
 
-Ruff checks processing code, CLI modules, maintenance tools, and backend
-management commands. The legacy backend's wider style/type backlog is not
-silently reformatted as part of this maintenance work. `pixi run typecheck` is
-informational in CI and manual locally; it is not part of `check`.
+`check` runs Ruff lint, formatting checks, and pytest. Ruff checks processing
+code, CLI modules, maintenance tools, and backend management commands. The legacy
+backend has a wider style/type backlog outside that scope.
+`pixi run --locked typecheck` is informational in CI and manual locally; it is
+not part of `check`.
 `pixi run -e frontend frontend:lint` is available for working through the existing
 frontend lint backlog. The TypeScript/Vite build is required in CI.
 
@@ -70,3 +76,17 @@ resolving a second, conflicting runtime. Use `npm ci` via the frontend Pixi task
 commit intentional changes to `web/frontend/package-lock.json`.
 
 See [operations](operations.md) for deployment and restoration procedures.
+
+## Documentation and automation
+
+Maintain setup in `docs/installation/`, user workflows in `docs/usage/`, and
+configuration details in `docs/reference/`. This page owns development commands;
+the README and root `AGENTS.md` provide entry points. Keep the dated
+[upstream integration record](upstream-integration.md) for the rationale behind
+fork decisions. Superseded root setup guides and the old all-in-one user manual
+are available in Git history.
+
+MkDocs uses `mkdocs.yml` and the `docs` environment. Add new maintained pages to
+its navigation and validate links with the strict build. There is no separate
+Sphinx build. The tracked workflows are `test.yml` (checks), `security.yml`
+(secret/dependency scans), and `docker.yml` (container validation).

@@ -1,167 +1,69 @@
-
-![GeoDE log](logos/Highres-GeoDe-Logo-final-05-Black.png)
+![GeoDE logo](logos/Highres-GeoDe-Logo-final-05-Black.png)
 
 # GeoDE (Geodesy Database Engine)
 
-A comprehensive Python framework for automated GNSS data processing, analysis, and management. GeoDE integrates multiple geodetic software packages (GAMIT/GLOBK, GPSPACE, and soon M-PAGES) with PostgreSQL database management and web-based visualization tools.
+GeoDE manages GNSS observations, station metadata, processing, and time series
+analysis. Originally developed by [Demian Gomez](https://github.com/demiangomez)
+and contributors, it combines a Python library and command-line tools with a
+Django API, React web interface, and a shared PostgreSQL database.
 
-## Overview
+## This fork
 
-**GeoDE (Geodesy Database Engine)** provides a complete solution for processing and managing large-scale GNSS datasets for geodetic applications. Originally developed by [Demian Gomez](https://github.com/demiangomez) and contributors, GeoDE handles the entire workflow from raw data ingestion to time series analysis, offering parallelized processing capabilities, robust metadata tracking, and comprehensive quality control tools.
+Develop and deploy from `dev` in [silentpills/geode](https://github.com/silentpills/geode).
+`main` is an upstream mirror; selected upstream changes and retained scientific
+defaults are documented in the [integration record](docs/development/upstream-integration.md).
+The backend image builds the processing library from the same checkout. This
+fork has no PyPI publication or release automation.
 
-### Key Features
+## Capabilities
 
-- 🚀 **Parallel Processing** - Distribute geodetic processing jobs across multiple compute nodes for maximum throughput
-- 🗄️ **PostgreSQL Integration** - Centralized storage and management of RINEX data, station metadata, and processing results
-- 🌐 **GeoDE Desktop Web Interface** - Interactive map-based visualization for monitoring station networks and managing metadata
-- 📊 **Time Series Analysis** - Built-in tools for plotting and analyzing position time series with ETM (Extended Trajectory Model) fitting
-- 🔍 **Quality Control** - Automated detection of metadata inconsistencies and data gaps
-- 📡 **Multi-Format Support** - Handle RINEX 2/3, Hatanaka compression, and various coordinate systems
-- 🔧 **Multi-Software Integration** - Seamlessly process data using GAMIT/GLOBK, GPSPACE, and M-PAGES (NGS)
+- Download, validate, and archive RINEX observations using station identity and
+  coordinate checks.
+- Run PPP and GAMIT/GLOBK processing with external geodetic tools and Dispy workers.
+- Manage equipment history, antenna/radome combinations, site visits, and data gaps.
+- Fit and plot Extended Trajectory Models, stack solutions, and export station
+  reports and campaign-planning products.
+- Inspect stations and edit metadata through the map-based web interface.
 
-## Architecture
+## Get started
 
-GeoDE consists of two main components:
-
-1. **Command Line Interface (CLI)** - Core processing engine for parallel GNSS analysis
-2. **Web Interface** - Django-based frontend for station monitoring and metadata management
-
-## Installation
-
-### Prerequisites
-
-Ensure the following dependencies are installed and available in your PATH:
-
-- **GAMIT/GLOBK** - http://www-gpsg.mit.edu/gg/
-- **GFZRNX** - https://gnss.gfz-potsdam.de/services/gfzrnx
-- **rnx2crx/crx2rnx** - https://terras.gsi.go.jp/ja/crx2rnx.html
-- **GPSPACE** - https://github.com/demiangomez/GPSPACE
-- **PostgreSQL** (server)
-- **Pixi 0.80.0** (manages Python 3.13)
-
-### Database Setup
-
-Use `pixi run -e web db:migrate` against an empty database, or let Docker run
-that command at startup. It creates the processing schema, reference catalogs,
-and web tables together. No default login accounts are installed. See
-[Database setup](docs/installation/database-setup.md).
-
-### CLI Installation
+Use Pixi 0.80.0 to reproduce the committed Python 3.13 environments:
 
 ```bash
 git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
 pixi install --locked
+pixi run --locked python -m com.PlotETM --help
 ```
 
-Use `.env` for database credentials and `gnss_data.cfg` for archive paths, external executables, and compute nodes. Run commands from this checkout with `pixi run python -m com.PlotETM --help`, for example. See [INSTALL.md](INSTALL.md) for setup.
-
-The `dev` branch contains both the processing library and web application. The backend Docker image builds the library from this checkout, so deploying the fork does not depend on a separate upstream release. `main` is kept as an upstream mirror. This fork has no PyPI publication or release automation.
-
-## Core CLI Tools
-
-### Data Management
-- **`ArchiveService.py`** - Service for managing archive operations and locks
-- **`DownloadSources.py`** - Automated RINEX data retrieval from external sources
-- **`ScanArchive.py`** - Archive scanning, station info insertion, and PPP processing
-
-### Analysis & Visualization
-- **`PlotETM.py`** - Time series plotting with trajectory model fitting
-- **`AlterETM.py`** - Modify ETM parameters (polynomial terms, jumps, periodic signals)
-
-### Station Selection Syntax
-
-All CLI tools support flexible station selection:
-
-```bash
-# Single station
-PlotETM.py igs.pwro
-
-# Multiple stations
-PlotETM.py igs.pwro igs.onsa
-
-# All stations in a network
-PlotETM.py igs.all
-
-# Country code (ISO 3166)
-PlotETM.py ARG
-
-# Wildcards (regex style)
-PlotETM.py ars.at1[3-5]  # at13, at14, at15
-PlotETM.py ars.at%       # all stations starting with 'at'
-
-# Exclusions
-PlotETM.py igs.all *igs.pwro  # all IGS stations except pwro
-
-# Selection by type (requires GeoDE Studio tables api_stationtype and api_stationmeta)
-PlotETM.py ARG:CONTINUOUS  # Continuous stations in Argentina
-PlotETM.py CHL:CAMPAIGN    # Campaign stations in Chile
-PlotETM.py USA:CORS        # CORS stations in USA
-PlotETM.py all:CONTINUOUS  # All CONTINUOUS stations
-
-# Geographic region selection
-PlotETM.py ARG:LAT[-35,-40]            # All stations in ARG within LAT range
-PlotETM.py ARG:BBOX[-30,-40,-70,-60]   # Bounding box in Argentina
-PlotETM.py ARG:PLATE[SC]               # Argentina stations in the Scotia plate
-PlotETM.py ARG:RADIUS[-35.5,-65.2,500] # 500 km radius around point
-
-# Combined filters
-PlotETM.py ARG:CAMPAIGN:RADIUS[-35.5,-65.2,500] # 500 km radius around point, only campaign sites
-```
-
-## Web Interface
-
-The web interface provides:
-
-- 🗺️ **Interactive Map** - OpenStreetMap-based visualization with station status indicators
-- 📋 **Station Details** - Equipment history, coordinates, photos, and site visit logs
-- 📁 **RINEX Management** - File browser with metadata validation and gap detection
-- ⚙️ **Metadata Editor** - Web-based forms for updating station information
-- 🔍 **Search & Filters** - Query stations by code, network, country, or date range
-
-### Key Indicators
-
-- 🟢 **Green markers** - Stations with complete, validated metadata
-- 🔴 **Red markers** - Stations requiring attention (missing metadata or errors)
-- ⚠️ **Warning icons** - RINEX files with metadata inconsistencies
-
-See [WebInterface.md](WebInterface.md) for detailed interface documentation.
-
-## Example Workflows
-
-### Process new RINEX data
-```bash
-# Download and scan for new files
-DownloadSources.py igs.all -win 7
-
-# Run PPP solutions
-ScanArchive.py igs.all -ppp
-
-# Plot time series
-PlotETM.py igs.pwro -gui
-```
-
-### Add earthquake jump to trajectory model
-```bash
-AlterETM.py igs.pwro -fun j + 1 2024/02/15 30,60
-```
+Follow the [installation guide](docs/installation/index.md) for native or Docker
+setup. Credentials belong in `.env`; archive paths, executables, and compute nodes
+belong in `gnss_data.cfg`. Database initialization uses Django migrations and
+creates no default login accounts. Install GAMIT/GLOBK, GFZRNX, Hatanaka tools,
+and GPSPACE separately when your processing workload needs them.
 
 ## Documentation
 
-- [Installation Guide](INSTALL.md) - Detailed setup instructions
-- [Web Interface Guide](GeoDE_User_Manual.md#6-web-interface-guide) - Complete UI documentation
-- [CLI Reference](GeoDE_User_Manual.md#5-command-line-tools-reference) - Command-line tool usage
+The maintained documentation lives in [`docs/`](docs/index.md):
 
-## Citation
+- [Installation](docs/installation/index.md), [database setup](docs/installation/database-setup.md),
+  and [configuration](docs/reference/configuration.md).
+- [Processing workflow](docs/usage/processing-workflow.md) and [CLI reference](docs/usage/cli-reference.md).
+- [Web interface](docs/usage/web-interface.md), [antenna catalog](docs/usage/antenna-catalog.md),
+  and [reports and campaigns](docs/usage/reports-and-campaigns.md).
+- [Development and checks](docs/development/contributing.md) and [operations](docs/development/operations.md).
+- [Agent instructions](AGENTS.md).
 
-If you use GeoDE in your research, please cite:
+Preview with `pixi run --locked -e docs docs:serve`; validate with
+`pixi run --locked -e docs docs:build --strict`.
 
-> Gomez, D.D., et al. (2024). GeoDE: Geodesy Database Engine for automated GNSS processing and analysis. *GitHub repository*. https://github.com/demiangomez/geode
+## Citation and license
 
-## License
+If you use GeoDE in research, cite the upstream project and record the fork
+revision used for reproducibility:
 
-BSD 3-Clause License
+> Gomez, D.D., et al. (2024). GeoDE: Geodesy Database Engine for automated GNSS
+> processing and analysis. [GitHub repository](https://github.com/demiangomez/geode).
 
-## Support
-
-For questions, issues, or contributions, please open an issue on the [GitHub repository](https://github.com/demiangomez/Parallel.GAMIT).
+GeoDE uses the [BSD 3-Clause License](LICENSE). Report fork issues in
+[silentpills/geode](https://github.com/silentpills/geode/issues).
