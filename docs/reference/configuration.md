@@ -23,7 +23,6 @@ hostname = your-db-server.example.com
 username = geode
 password = your_secure_password
 database = geode
-format_scripts_path = /path/to/format_scripts
 ```
 
 | Setting | Description | Required |
@@ -32,7 +31,6 @@ format_scripts_path = /path/to/format_scripts
 | `username` | Database username | Yes |
 | `password` | Database password | Yes |
 | `database` | Database name | Yes |
-| `format_scripts_path` | Path to data download format scripts | Yes |
 
 ### [archive] Section
 
@@ -42,6 +40,7 @@ RINEX and orbit file locations.
 [archive]
 path = /path/to/archive
 repository = /path/to/repository
+format_scripts_path = /path/to/format_scripts
 ionex = /path/to/orbits/ionex/$year
 brdc = /path/to/orbits/brdc/$year
 sp3 = /path/to/orbits/sp3/$gpsweek
@@ -55,6 +54,7 @@ sp3_st = FIN,SNX,RAP
 |---------|-------------|----------|
 | `path` | RINEX tank location | Yes |
 | `repository` | Incoming RINEX files location | Yes |
+| `format_scripts_path` | Directory for [custom download converters](../usage/processing-workflow.md#custom-download-converters) | No |
 | `ionex` | IONEX files path (supports variables) | Yes |
 | `brdc` | Broadcast orbits path (supports variables) | Yes |
 | `sp3` | SP3 orbits path (supports variables) | Yes |

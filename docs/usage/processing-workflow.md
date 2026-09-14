@@ -23,7 +23,7 @@ DownloadSources.py -> repository/data_in -> ArchiveService.py
    server settings from `sources_servers`, and conversion formats from
    `sources_formats`. It downloads observations into `data_in`. Format scripts
    configured through `format_scripts_path` convert supported receiver formats
-   before ingestion.
+   before ingestion; see [custom download converters](#custom-download-converters).
 2. `ArchiveService.py` reads incoming files, checks RINEX metadata, and uses PPP
    or autonomous coordinates to check station identity. A matching filename
    alone does not establish that a file belongs to a station. New stations can
@@ -53,6 +53,40 @@ pixi run --locked python -m com.PlotETM net.station -gui
 Replace station/date examples with the intended dataset. Downloading and archive
 processing write files and database records. `ArchiveService.py` scans the
 configured repository, rather than accepting a station filter.
+
+## Custom download converters
+
+Set `format_scripts_path` in the `[archive]` section of `gnss_data.cfg` to the
+converter directory. A non-null `sources_stations.format` overrides
+`sources_servers.format`. For a custom format such as `CUSTOM_FORMAT`,
+`DownloadSources.py` lowercases the format and uses the first file found in this
+order: `custom_format`, `custom_format.sh`, `custom_format.py`. The file must be
+executable, with a valid interpreter shebang for a script: GeoDE executes it
+directly. Make the converter available at the configured path, with its
+dependencies installed, on each node that runs download post-processing.
+`DEFAULT_FORMAT` and `RNX2CRZ` do not invoke a custom converter.
+
+The converter receives three positional arguments after its executable path:
+
+| Argument | Value |
+| --- | --- |
+| 1 | Absolute path to the downloaded input file. |
+| 2 | Downloaded filename, without its directory. |
+| 3 | Existing temporary directory in which to write the converted files. |
+
+Write one or more readable RINEX observation files directly into argument 3,
+using RINEX 2-style filenames such as `abcd0010.24o` or `abcd0010.24d.Z`.
+The output selector is `*.??[oOdD]*`; it includes compressed suffixes but does
+not select standard long RINEX 3 filenames or search subdirectories. GeoDE then
+reads the selected files, normalizes their names, and compresses them into the
+station's download directory for ingestion.
+
+Exit with status zero on success. A missing or non-executable script, a nonzero
+exit status, or unreadable RINEX output fails post-processing. If no output
+matches the selector, the error is `No files found after processing`. GeoDE
+reports the processing error and tries the next configured download source,
+if available. The temporary directory and downloaded input are removed after
+the processing attempt, including on failure.
 
 ## Retry, rejection, and evidence
 
