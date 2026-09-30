@@ -22,6 +22,7 @@ nav:
   - Usage:
     - Processing Workflow: usage/processing-workflow.md
     - CLI Reference: usage/cli-reference.md
+    - S-score Values: usage/s-score.md
     - Antenna Catalog: usage/antenna-catalog.md
     - Reports and Campaigns: usage/reports-and-campaigns.md
     - Web Interface: usage/web-interface.md
