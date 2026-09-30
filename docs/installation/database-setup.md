@@ -22,8 +22,10 @@ Even a CLI-only installation can use this initialization command and then run
 processing in the default Pixi environment.
 
 The packaged `geode/sql/bootstrap_v1/` directory is an immutable bootstrap
-snapshot. `database/schema.sql` and `database/csv` are compatibility symlinks to
-it. Do not edit the snapshot for later schema changes: add a versioned migration.
+snapshot. `database/schema.sql` is a compatibility wrapper that loads the
+snapshot and later processing SQL migrations; `database/csv` remains a symlink
+to its seed data. Do not edit the snapshot for later schema changes: add a
+versioned migration.
 `database/seed.sql` remains a manual-import compatibility script; run it from
 `database/` only when deliberately creating a SQL-only schema. Do not import the
 snapshot or CSVs over a database that has already been initialized.

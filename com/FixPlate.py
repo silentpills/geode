@@ -12,6 +12,7 @@ import argparse
 import datetime
 import json
 import os
+import tempfile
 
 import numpy as np
 import simplekml
@@ -21,6 +22,7 @@ from geode import dbConnection, pyETM
 from geode.pyDate import Date
 from geode.pyLeastSquares import adjust_lsq
 from geode.pyOkada import ScoreTable, cosd, sind
+from geode.reference_frames import frame_provenance, save_frame, source_epochs
 from geode.Utils import (
     add_version_argument,
     cart2euler,
@@ -200,6 +202,29 @@ def analize_candidates(cnn, args):
         kml.savekmz(kmz_file + ".kmz")
 
 
+def vertical_reference_tokens(tokens):
+    """Accept station/velocity pairs, quoted rows, or a station-list file."""
+    rows = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if len(token.split()) > 1 or os.path.isfile(token):
+            rows.append(token)
+            i += 1
+        else:
+            if i + 1 >= len(tokens):
+                raise ValueError("VREF requires a velocity in mm/yr for each station")
+            try:
+                float(tokens[i + 1])
+            except ValueError as error:
+                raise ValueError(
+                    "VREF requires station/velocity pairs in mm/yr"
+                ) from error
+            rows.append(f"{token} {tokens[i + 1]}")
+            i += 2
+    return rows
+
+
 def euler_pole(args, cnn):
     # stations to use
     if args.include_stations:
@@ -223,8 +248,17 @@ def euler_pole(args, cnn):
     # vertical reference frame transformation
     if len(args.vertical_ref):
         vref = process_stnlist(
-            cnn, args.include_stations, summary_title="Stations for VREF:"
+            cnn,
+            vertical_reference_tokens(args.vertical_ref),
+            summary_title="Stations for VREF:",
         )
+        for station in vref:
+            if not station.get("parameters") or not np.isfinite(
+                float(station["parameters"][0])
+            ):
+                raise ValueError(
+                    f"VREF requires a finite velocity for {stationID(station)}"
+                )
     else:
         vref = []
 
@@ -245,7 +279,7 @@ def euler_pole(args, cnn):
             # use a GAMIT stack
             rs = cnn.query_float(
                 f"""SELECT etms.*, 
-                                     stations.auto_x, stations.auto_y, stations.auto_z
+                                     stations.auto_x, stations.auto_y, stations.auto_z, stations.plate
                                      FROM etms INNER JOIN stations
                                      USING ("NetworkCode", "StationCode")
                                      WHERE ("NetworkCode", "StationCode", "stack",
@@ -258,7 +292,7 @@ def euler_pole(args, cnn):
             # use PPP solutions
             rs = cnn.query_float(
                 f"""SELECT etms.*, 
-                                                 stations.auto_x, stations.auto_y, stations.auto_z
+                                                 stations.auto_x, stations.auto_y, stations.auto_z, stations.plate
                                                  FROM etms INNER JOIN stations
                                                  USING ("NetworkCode", "StationCode")
                                                  WHERE ("NetworkCode", "StationCode", "soln",
@@ -270,14 +304,17 @@ def euler_pole(args, cnn):
 
         if len(rs):
             lla = xyz2sphere_lla([rs[0]["auto_x"], rs[0]["auto_y"], rs[0]["auto_z"]])
-            params = np.array(rs[0]["params"])
+            params = np.asarray(rs[0]["params"], dtype=float).reshape(3, -1)
+            if params.shape[1] < 2:
+                raise ValueError(f"Missing fitted velocity for {network}.{station}")
             hdata.append(
                 {
                     "NetworkCode": stn["NetworkCode"],
                     "StationCode": stn["StationCode"],
                     "lat": lla[0][0],
                     "lon": lla[0][1],
-                    "v": params.reshape((3, params.shape[0] // 3))[:, 1],
+                    "v": params[:, 1],
+                    "plate": rs[0]["plate"],
                 }
             )
 
@@ -293,7 +330,7 @@ def euler_pole(args, cnn):
                 # use a GAMIT stack
                 rs = cnn.query_float(
                     f"""SELECT etms.*,
-                                         stations.auto_x, stations.auto_y, stations.auto_z
+                                         stations.auto_x, stations.auto_y, stations.auto_z, stations.plate
                                          FROM etms INNER JOIN stations
                                          USING ("NetworkCode", "StationCode")
                                          WHERE ("NetworkCode", "StationCode",
@@ -306,7 +343,7 @@ def euler_pole(args, cnn):
                 # use PPP solutions
                 rs = cnn.query_float(
                     f"""SELECT etms.*,
-                                                     stations.auto_x, stations.auto_y, stations.auto_z
+                                                     stations.auto_x, stations.auto_y, stations.auto_z, stations.plate
                                                      FROM etms INNER JOIN stations
                                                      USING ("NetworkCode", "StationCode")
                                                      WHERE ("NetworkCode", "StationCode",
@@ -320,17 +357,25 @@ def euler_pole(args, cnn):
                 lla = xyz2sphere_lla(
                     [rs[0]["auto_x"], rs[0]["auto_y"], rs[0]["auto_z"]]
                 )
-                params = np.array(rs[0]["params"])
+                params = np.asarray(rs[0]["params"], dtype=float).reshape(3, -1)
+                if params.shape[1] < 2:
+                    raise ValueError(f"Missing fitted velocity for {network}.{station}")
                 vdata.append(
                     {
                         "NetworkCode": stn["NetworkCode"],
                         "StationCode": stn["StationCode"],
                         "lat": lla[0][0],
                         "lon": lla[0][1],
-                        "v": params.reshape((3, params.shape[0] // 3))[:, 1],
+                        "v": params[:, 1],
+                        "vu_external": float(stn["parameters"][0]) / 1000.0,
                     }
                 )
-                vdata[-1]["v"][2] -= float(stn["parameters"][0]) / 1000.0
+                vdata[-1]["v"][2] -= vdata[-1]["vu_external"]
+
+    if not hdata:
+        raise ValueError("No fitted HREF station velocities were found")
+    if vref and len(vdata) != len(vref):
+        raise ValueError("Every requested VREF station must have a fitted velocity")
 
     A, L = build_design(hdata, vdata)
 
@@ -472,106 +517,102 @@ def euler_pole(args, cnn):
                 file_write(xfile + ".json", json.dumps(obj, indent=4, sort_keys=False))
 
     if save_stack:
-        stations = get_stack_stations(cnn, args.stack_name[0])
+        save_corrected_stack(cnn, args, hdata, vdata, C)
 
-        # delete the entire stack to produce the new one
-        if not args.preserve_stack:
-            existing_stns = []
-            cnn.query(f"DELETE FROM stacks WHERE name = '{save_stack}'")
-        else:
-            existing_stns = get_stack_stations(cnn, save_stack)
-            existing_stns = [stationID(stn) for stn in existing_stns]
 
-        pbar = tqdm(total=0, ncols=80, disable=None)
+def save_corrected_stack(cnn, args, hdata, vdata, coefficients):
+    """Finish ETM work before atomically replacing coordinates and provenance."""
+    stack = args.stack_name[0]
+    name = args.save_stack.lower()
+    provenance, constraints = frame_provenance(
+        hdata, vdata, coefficients, stack, args.ppp_solutions
+    )
+    if name == provenance["source_stack"]:
+        raise ValueError("Use a different output name from the source stack")
+    if args.ppp_solutions:
+        # PPP has no input stack. Enumerate its actual stations, then reject
+        # ambiguous source reference frames before asking PPPETM to fit them.
+        stations = cnn.query_float(
+            'SELECT DISTINCT "NetworkCode", "StationCode", auto_x, auto_y, auto_z '
+            'FROM ppp_soln JOIN stations USING ("NetworkCode", "StationCode")',
+            as_dict=True,
+        )
+        for station in stations:
+            lla = xyz2sphere_lla([station[k] for k in ("auto_x", "auto_y", "auto_z")])
+            station["lat"], station["lon"] = lla[0][:2]
+    else:
+        stations = get_stack_stations(cnn, stack)
 
-        for i, stn in enumerate(stations):
-            # if preserve_stack, check if station was saved. If it was then skip
-            if args.preserve_stack:
-                if stationID(stn) in existing_stns:
-                    tqdm.write(
-                        " -- Station %s (%i/%i) already in stack %s, skipping"
-                        % (stationID(stn), i + 1, len(stations), save_stack)
-                    )
-                    continue
+    if args.save_filter:
+        selected = {
+            stationID(station)
+            for station in process_stnlist(
+                cnn,
+                args.save_filter,
+                summary_title="Stations to save:",
+            )
+        }
+        stations = [station for station in stations if stationID(station) in selected]
+    if args.preserve_stack:
+        retained = {stationID(station) for station in get_stack_stations(cnn, name)}
+        stations = [
+            station for station in stations if stationID(station) not in retained
+        ]
 
-            try:
-                tqdm.write(
-                    " -- Estimating EP velocity for station %s (%i/%i)"
-                    % (stationID(stn), i + 1, len(stations))
+    # One JSON record per station limits memory to a single ETM time series.
+    # Exceptions leave the existing saved stack completely untouched.
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as spool:
+        for station in tqdm(stations, ncols=80, disable=None):
+            network, code = station["NetworkCode"], station["StationCode"]
+            epochs = source_epochs(cnn, network, code, stack, args.ppp_solutions)
+            design, _ = build_design([station], [station] if vdata else [])
+            velocity = np.zeros((3, 1))
+            velocity[: 3 if vdata else 2] = design @ coefficients
+            model = pyETM.Model(pyETM.Model.VEL, velocity=velocity, fit=True)
+            kwargs = dict(models=[model], plot_remove_jumps=True)
+            if args.ppp_solutions:
+                etm = pyETM.PPPETM(cnn, network, code, **kwargs)
+            else:
+                etm = pyETM.GamitETM(cnn, network, code, stack_name=stack, **kwargs)
+            if len(etm.soln.date) != etm.L.shape[1]:
+                raise ValueError(
+                    f"Coordinate/date length mismatch for {network}.{code}"
                 )
-
-                StationCode = stn["StationCode"]
-                NetworkCode = stn["NetworkCode"]
-
-                A, _ = build_design([stn], [stn] if len(vref) > 0 else [])
-                v = np.zeros((3, 1))
-                v[0 : 3 if len(vref) > 0 else 2] = A @ C
-                model = pyETM.Model(pyETM.Model.VEL, velocity=v, fit=True)
-
-                if not args.ppp_solutions:
-                    etm = pyETM.GamitETM(
-                        cnn,
-                        stn["NetworkCode"],
-                        stn["StationCode"],
-                        stack_name=stack,
-                        models=[model],
-                        plot_remove_jumps=True,
-                    )
-                else:
-                    etm = pyETM.PPPETM(
-                        cnn,
-                        stn["NetworkCode"],
-                        stn["StationCode"],
-                        models=[model],
-                        plot_remove_jumps=True,
-                    )
-
-                tqdm.write(
-                    " -- Saving station %s to stack %s (%i/%i)"
-                    % (stationID(stn), save_stack, i + 1, len(stations))
-                )
-                pbar.total = len(etm.soln.date)
-                pbar.reset()
-
-                for x, y, z, d in zip(etm.L[0], etm.L[1], etm.L[2], etm.soln.date):
-                    cnn.insert(
-                        "stacks",
-                        Project=etm.soln.project,
-                        NetworkCode=NetworkCode,
-                        StationCode=StationCode,
+            rows = []
+            for x, y, z, date in zip(*etm.L, etm.soln.date):
+                source = epochs[(int(date.year), int(date.doy))]
+                rows.append(
+                    dict(
+                        Project=None if args.ppp_solutions else source,
+                        ppp_reference_frame=source if args.ppp_solutions else None,
+                        NetworkCode=network,
+                        StationCode=code,
                         X=float(x),
                         Y=float(y),
                         Z=float(z),
-                        sigmax=0.00,
-                        sigmay=0.00,
-                        sigmaz=0.00,
-                        FYear=float(d.fyear),
-                        Year=int(d.year),
-                        DOY=int(d.doy),
-                        name=save_stack,
+                        sigmax=0.0,
+                        sigmay=0.0,
+                        sigmaz=0.0,
+                        FYear=float(date.fyear),
+                        Year=int(date.year),
+                        DOY=int(date.doy),
                     )
-                    pbar.update()
-                pbar.refresh()
-
-                # replace stack name so that figures show the new stack name
-                etm.soln.stack_name = save_stack
-
-                if args.plot_etms:
-                    xfile = os.path.join(
-                        args.directory,
-                        "%s.%s_%s" % (etm.NetworkCode, etm.StationCode, "plate-fixed"),
-                    )
-                    etm.plot(xfile + ".png", plot_missing=False)
-
-            except pyETM.pyETMException as e:
-                tqdm.write(str(e))
-            except Exception as e:
-                tqdm.write(
-                    " -- Unexpected exception while processing %s: %s"
-                    % (stationID(stn), str(e))
                 )
-
-        pbar.close()
+            spool.write(json.dumps(rows) + "\n")
+            etm.soln.stack_name = name
+            if args.plot_etms:
+                path = os.path.join(args.directory, f"{network}.{code}_plate-fixed.png")
+                etm.plot(path, plot_missing=False)
+        spool.seek(0)
+        count = save_frame(
+            cnn,
+            name,
+            provenance,
+            constraints,
+            (json.loads(line) for line in spool),
+            preserve=args.preserve_stack,
+        )
+    tqdm.write(f" -- Saved {count} corrected station-days to frame {name}")
 
 
 def main():
@@ -651,8 +692,8 @@ def main():
         action="store_true",
         default=False,
         help="""Do not erase stack when saving stations. This is useful for 
-                        adding new stations to the stack, but EP parameters should match to 
-                        keep the stack consistent.""",
+                        adding new stations to the stack, when the saved fit and source provenance match. Incompatible
+                        fits and legacy stacks require rebuilding.""",
     )
 
     parser.add_argument(
@@ -673,6 +714,14 @@ def main():
                              frame as new stack.
                              Switch requires a stack name to use. WARNING!
                              If stack exists it will be overwritten.""",
+    )
+
+    parser.add_argument(
+        "-save_filter",
+        "--save_filter",
+        nargs="+",
+        type=str,
+        help="Stations to save from the source stack or PPP solutions (default: all).",
     )
 
     parser.add_argument(

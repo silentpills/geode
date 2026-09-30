@@ -284,3 +284,68 @@ def test_legacy_blank_radome_can_be_retained_on_existing_history(api_db):
     update.save()
     record.refresh_from_db()
     assert record.radome_code == ""
+
+
+def test_stack_api_engine_source_validation_and_partial_updates(api_db):
+    from api.models import Stacks
+    from api.views import StacksDetail, StacksList
+    from rest_framework.test import APIRequestFactory
+
+    with api_db.cursor() as cursor:
+        cursor.execute(
+            'INSERT INTO gamit_soln ("NetworkCode", "StationCode", "Project", "Year", "DOY") '
+            "VALUES ('tst', 'test', 'regional', 2026, 1)"
+        )
+        cursor.execute(
+            'INSERT INTO ppp_soln ("NetworkCode", "StationCode", "Year", "DOY", "ReferenceFrame") '
+            "VALUES ('tst', 'test', 2026, 1, 'IGS20')"
+        )
+    factory = APIRequestFactory()
+    listing = StacksList.as_view(authentication_classes=[], permission_classes=[])
+    detail = StacksDetail.as_view(authentication_classes=[], permission_classes=[])
+    base = dict(
+        network_code="tst", station_code="test", year=2026, doy=1, name="invalid"
+    )
+    for invalid in (
+        {},
+        {"project": None},
+        {"project": ""},
+        {"engine": "unknown"},
+        {"project": "regional", "ppp_reference_frame": "IGS20"},
+        {"project": "regional", "ppp_reference_frame": ""},
+        {"engine": "ppp"},
+        {"engine": "ppp", "ppp_reference_frame": ""},
+        {"engine": "ppp", "project": "regional", "ppp_reference_frame": "IGS20"},
+        {"engine": "ppp", "project": "", "ppp_reference_frame": "IGS20"},
+    ):
+        response = listing(
+            factory.post("/api/stacks", {**base, **invalid}, format="json")
+        )
+        assert response.status_code == 400, response.data
+    assert not Stacks.objects.exists()
+    for fields in (
+        dict(name="api_gamit", project="regional"),
+        dict(name="api_ppp", engine="ppp", project=None, ppp_reference_frame="IGS20"),
+    ):
+        response = listing(
+            factory.post("/api/stacks", {**base, **fields}, format="json")
+        )
+        assert response.status_code == 201, response.data
+        pk = response.data["api_id"]
+        changed = detail(
+            factory.patch(f"/api/stacks/{pk}", {"x": "10"}, format="json"), pk=pk
+        )
+        assert changed.status_code == 200, changed.data
+        assert changed.data["engine"] == fields.get("engine", "gamit")
+        invalid = (
+            {"project": None}
+            if fields.get("engine") != "ppp"
+            else {"ppp_reference_frame": None}
+        )
+        rejected = detail(
+            factory.patch(f"/api/stacks/{pk}", invalid, format="json"), pk=pk
+        )
+        assert rejected.status_code == 400, rejected.data
+        record = Stacks.objects.get(pk=pk)
+        assert record.project == fields["project"]
+        assert record.ppp_reference_frame == fields.get("ppp_reference_frame")

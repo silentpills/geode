@@ -72,3 +72,6 @@ def postgres_connection(tmp_path):
         finally:
             process.terminate()
             process.wait(timeout=20)
+            # Keep the log, but do not retain a stopped database for every test.
+            # A suite can otherwise exhaust temporary-directory disk quotas.
+            shutil.rmtree(cluster, ignore_errors=True)

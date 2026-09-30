@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import numpy as np
 import psycopg
+from psycopg import sql
 from psycopg.adapt import Dumper, Loader
 from psycopg.rows import dict_row, tuple_row
 
@@ -26,39 +27,15 @@ DEBUG = False
 
 
 def cast_array_to_float(recordset):
-    if len(recordset) > 0:
-        if not isinstance(recordset[0], dict):
-            result = []
-            for record in recordset:
-                new_record = []
-                for field in record:
-                    if isinstance(field, list):
-                        new_record.append(
-                            [
-                                float(value) if isinstance(value, Decimal) else value
-                                for value in field
-                            ]
-                        )
-                    else:
-                        if isinstance(field, Decimal):
-                            new_record.append(float(field))
-                        else:
-                            new_record.append(field)
-
-                result.append(tuple(new_record))
-
-            return result
-        else:
-            # Convert any DECIMAL values to float
-            for record in recordset:
-                for key, value in record.items():
-                    if isinstance(value, Decimal):
-                        record[key] = float(value)
-                    elif isinstance(value, list) and all(
-                        isinstance(i, Decimal) for i in value
-                    ):
-                        record[key] = [float(i) for i in value]
-
+    """Convert PostgreSQL numeric scalars and nested arrays without flattening."""
+    if isinstance(recordset, Decimal):
+        return float(recordset)
+    if isinstance(recordset, dict):
+        return {key: cast_array_to_float(value) for key, value in recordset.items()}
+    if isinstance(recordset, tuple):
+        return tuple(cast_array_to_float(value) for value in recordset)
+    if isinstance(recordset, list):
+        return [cast_array_to_float(value) for value in recordset]
     return recordset
 
 
@@ -323,6 +300,15 @@ def run_db_migrations(cnn: "Cnn"):
                 files("geode").joinpath("sql/antenna_radomes_v1.sql").read_text()
             )
 
+    if not cnn.query_float(
+        "SELECT to_regclass('public.reference_frames') IS NOT NULL AS ready",
+        as_dict=True,
+    )[0]["ready"]:
+        with cnn.cnn.transaction():
+            cnn.cursor.execute(
+                files("geode").joinpath("sql/reference_frames_v1.sql").read_text()
+            )
+
     ##################################################################
     # Index events(EventDate) and stacks(name): both are queried/filtered
     # on these columns often enough (event log lookups, stack name lookups)
@@ -580,6 +566,30 @@ class Cnn(object):
         except psycopg.errors.UniqueViolation as e:
             self.cnn.rollback()
             raise dbErrInsert(e)
+
+    def insert_many(self, table: str, rows):
+        """Insert equally shaped dictionaries atomically, respecting outer transactions.
+
+        Unlike the legacy single-row helper this never commits a caller's
+        transaction, drops unknown fields, or relies on dictionary key order.
+        psycopg3 executemany pipelines the parameterized inserts.
+        """
+        rows = list(rows)
+        if not rows:
+            return
+        fields = tuple(rows[0])
+        if not fields or any(set(row) != set(fields) for row in rows):
+            raise ValueError("Bulk rows must have the same nonempty fields")
+        statement = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+            sql.Identifier(table),
+            sql.SQL(", ").join(map(sql.Identifier, fields)),
+            sql.SQL(", ").join(sql.Placeholder() for _ in fields),
+        )
+        with self.cnn.transaction():
+            with self.cnn.cursor() as cursor:
+                cursor.executemany(
+                    statement, ([row[f] for f in fields] for row in rows)
+                )
 
     def update(self, table: str, set_clause_dict: dict, **kwargs):
         """

@@ -557,13 +557,19 @@ class GamitSoln:
 
         # get the project name that initiated the stack
         prj = cnn.query_float(
-            "SELECT \"Project\" FROM stacks WHERE name = '%s' AND "
+            "SELECT \"Project\", engine FROM stacks WHERE name = '%s' AND "
             "\"NetworkCode\" = '%s' AND \"StationCode\" = '%s' LIMIT 1"
             % (stack_name, NetworkCode, StationCode),
             as_dict=True,
         )
         # check if len > 0, sometimes some stations don't have any data!
         if len(prj) > 0:
+            if prj[0]["engine"] != "gamit":
+                raise pyETMException(
+                    f"Stack {stack_name} contains corrected PPP coordinates; "
+                    "GamitETM supports GAMIT stacks only. Use PPPETM on ppp_soln "
+                    "for PPP fitting; corrected PPP stacks are saved output."
+                )
             self.project = prj[0]["Project"]
 
         self.stack_name = stack_name

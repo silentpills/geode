@@ -1088,9 +1088,32 @@ class SourcesStationsSerializer(serializers.ModelSerializer):
 
 
 class StacksSerializer(serializers.ModelSerializer):
+    engine = serializers.ChoiceField(choices=('gamit', 'ppp'), default='gamit')
+
     class Meta:
         model = models.Stacks
         fields = '__all__'
+
+    def validate(self, data):
+        # PATCH inherits omitted fields from the stored row.
+        engine = data.get('engine', getattr(self.instance, 'engine', 'gamit'))
+        project = data.get('project', getattr(self.instance, 'project', None))
+        ppp_frame = data.get(
+            'ppp_reference_frame', getattr(self.instance, 'ppp_reference_frame', None))
+        errors = {}
+        if engine == 'gamit':
+            if not project:
+                errors['project'] = 'A project is required for GAMIT stacks.'
+            if ppp_frame is not None:
+                errors['ppp_reference_frame'] = 'GAMIT stacks require a null PPP reference frame.'
+        else:
+            if project is not None:
+                errors['project'] = 'PPP stacks require a null project.'
+            if not ppp_frame:
+                errors['ppp_reference_frame'] = 'A source reference frame is required for PPP stacks.'
+        if errors:
+            raise serializers.ValidationError(errors)
+        return data
 
 
 class StationaliasSerializer(serializers.ModelSerializer):

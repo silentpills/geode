@@ -34,9 +34,12 @@ list the original upstream commits as absent even where their code was ported.
   preserving the model table, API IDs, and height conversions. CLI imports,
   station editing, and the web API enforce the pair. See the
   [antenna catalog guide](../usage/antenna-catalog.md).
-- Database calibration-value import and selection, GAMIT project/reference-frame
-  management tables, and LLM-assisted metadata planning remain deferred. The
-  reporting tools do not require those features.
+- FixPlate saves bounded reference-frame provenance with atomic corrected
+  stacks, per-epoch source identities, and a minimal GAMIT project identifier
+  catalog. See [saved reference frames](../usage/reference-frames.md).
+- Database calibration-value import and selection, full GAMIT project
+  configuration management, and LLM-assisted metadata planning remain deferred.
+  The reporting tools do not require those features.
 
 ## Validation
 

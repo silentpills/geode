@@ -643,12 +643,18 @@ class GAMITSolutionData(SolutionData):
     def _load_project_info(self, cnn) -> None:
         """Load project information"""
         query = """
-            SELECT "Project" FROM stacks 
+            SELECT "Project", engine FROM stacks
             WHERE name = '%s' AND "NetworkCode" = '%s' AND "StationCode" = '%s' 
             LIMIT 1
         """ % (self.stack_name, self.network_code, self.station_code)
         result = cnn.query_float(query, as_dict=True)
         if result:
+            if result[0]["engine"] != "gamit":
+                raise SolutionDataException(
+                    f"Stack {self.stack_name} contains corrected PPP coordinates; "
+                    "GAMIT solution loading supports GAMIT stacks only. "
+                    "Corrected PPP stacks are saved output."
+                )
             self.project = result[0]["Project"]
             self.config.solution.project = self.project
 

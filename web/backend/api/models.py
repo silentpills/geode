@@ -711,13 +711,57 @@ class SourcesStations(BaseModel):
         unique_together = (('network_code', 'station_code', 'try_order'),)
 
 
+class GamitProjects(BaseModel):
+    project = models.CharField(max_length=20, unique=True)
+    api_id = models.AutoField(primary_key=True)
+
+    class Meta:
+        db_table = 'gamit_projects'
+
+
+class ReferenceFrames(BaseModel):
+    frame_name = models.CharField(max_length=20, unique=True)
+    engine = models.CharField(max_length=10)
+    project = models.CharField(max_length=20)
+    source_projects = models.JSONField(default=dict)
+    source_stack = models.CharField(max_length=20, blank=True, null=True)
+    fixed_plate = models.CharField(max_length=2, blank=True, null=True)
+    euler_pole = ArrayField(models.FloatField(), size=3, blank=True, null=True)
+    euler_pole_stations = ArrayField(models.CharField(max_length=8), blank=True, null=True)
+    translation_rate = ArrayField(models.FloatField(), size=3, blank=True, null=True)
+    first_epoch = models.DateTimeField(blank=True, null=True)
+    last_epoch = models.DateTimeField(blank=True, null=True)
+    created = models.DateTimeField(default=timezone.now)
+    modified = models.DateTimeField(default=timezone.now)
+    api_id = models.AutoField(primary_key=True)
+
+    class Meta:
+        db_table = 'reference_frames'
+
+
+class ReferenceFrameConstraints(BaseModel):
+    frame = models.ForeignKey(ReferenceFrames, models.PROTECT, db_column='constraints_id', to_field='frame_name')
+    network_code = models.CharField(max_length=3)
+    station_code = models.CharField(max_length=4)
+    vx = models.FloatField()
+    vy = models.FloatField()
+    vz = models.FloatField()
+    api_id = models.AutoField(primary_key=True)
+
+    class Meta:
+        db_table = 'reference_frame_constraints'
+        unique_together = (('frame', 'network_code', 'station_code'),)
+
+
 class Stacks(BaseModel):
     # Field name made lowercase. The composite primary key (NetworkCode, StationCode, Year, DOY, name) found, that is not supported. The first column is selected.
     network_code = models.CharField(db_column='NetworkCode', max_length=3)
     # Field name made lowercase.
     station_code = models.CharField(db_column='StationCode', max_length=4)
     # Field name made lowercase.
-    project = models.CharField(db_column='Project', max_length=20)
+    project = models.CharField(db_column='Project', max_length=20, blank=True, null=True)
+    engine = models.CharField(max_length=10, default='gamit')
+    ppp_reference_frame = models.CharField(max_length=20, blank=True, null=True)
     # Field name made lowercase.
     year = models.DecimalField(
         db_column='Year', max_digits=20, decimal_places=10)
@@ -833,6 +877,7 @@ class Stationinfo(BaseModel):
 
 
 class Stations(BaseModel):
+    plate = models.CharField(max_length=2, blank=True, null=True)
     # Field name made lowercase.
     network_code = models.ForeignKey(
         Networks, models.DO_NOTHING, db_column='NetworkCode', to_field="network_code")
