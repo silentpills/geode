@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/prefix-dev/pixi:0.80.0 AS build
+FROM ghcr.io/prefix-dev/pixi:0.81.0 AS build
 WORKDIR /app
 COPY pixi.toml pixi.lock pyproject.toml README.md LICENSE /app/
 COPY geode/ /app/geode/
