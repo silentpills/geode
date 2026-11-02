@@ -12,7 +12,7 @@ PPPSpatialCheck
 import os
 import re
 import uuid
-from math import isnan
+from math import isfinite, isnan
 from shutil import copyfile, rmtree
 
 # deps
@@ -189,6 +189,18 @@ class RunPPP(PPPSpatialCheck):
             os.path.join("production", "ppp"), str(uuid.uuid4())
         )
 
+        self.erase = erase
+        try:
+            self.ppp_timeout = float(options.get("ppp_timeout", 900))
+        except (TypeError, ValueError):
+            raise pyRunPPPException(
+                "ppp_timeout must be a positive finite number of seconds"
+            ) from None
+        if not isfinite(self.ppp_timeout) or self.ppp_timeout <= 0:
+            raise pyRunPPPException(
+                "ppp_timeout must be a positive finite number of seconds"
+            )
+
         self.antH = antenna_height
         self.ppp_path = options["ppp_path"]
         self.ppp = options["ppp_exe"]
@@ -251,7 +263,6 @@ class RunPPP(PPPSpatialCheck):
         self.otl_coeff = otl_coeff
         self.strict = strict
         self.apply_met = apply_met
-        self.erase = erase
         self.out = ""
         self.summary = ""
         self.pos = ""
@@ -263,14 +274,20 @@ class RunPPP(PPPSpatialCheck):
 
         # DDG: if RINEX 3 version, convert to RINEX 2 (no PPP support)
         if in_rinex.rinex_version >= 3:
-            # DDG: make a new object and convert to RINEX 3 to leave the other one untouched
+            # Convert a separate copy of the current observations, retaining any
+            # filtering/windowing performed since the original file was read.
             rinexobj = pyRinex.ReadRinex(
                 in_rinex.NetworkCode,
                 in_rinex.StationCode,
-                in_rinex.origin_file,
+                in_rinex.rinex_path,
                 no_cleanup=in_rinex.no_cleanup,
                 allow_multiday=in_rinex.allow_multiday,
+                # This is a validated working copy, potentially windowed below
+                # the original input-duration threshold.
+                min_time_seconds=0,
             )
+            rinexobj.origin_file = in_rinex.origin_file
+            rinexobj.origin_type = in_rinex.origin_type
             rinexobj.ConvertRinex(2)
         else:
             # file is in RINEX 2 format, use file as is
@@ -278,9 +295,13 @@ class RunPPP(PPPSpatialCheck):
 
         # DDG: issue with JPL orbits: some files with one epoch after midnight of next day make PPP
         # crash when using JPL orbits. Window the data
-        rinexobj.window_data(
-            rinexobj.date.first_epoch("datetime"), rinexobj.date.last_epoch("datetime")
-        )
+        start = max(rinexobj.datetime_firstObs, rinexobj.date.first_epoch("datetime"))
+        end = min(rinexobj.datetime_lastObs, rinexobj.date.last_epoch("datetime"))
+        if end < start:
+            raise pyRunPPPException(
+                "RINEX observations do not overlap the processing day"
+            )
+        rinexobj.window_data(start, end)
 
         PPPSpatialCheck.__init__(self)
 
@@ -884,7 +905,7 @@ class RunPPP(PPPSpatialCheck):
             # Fortran runtime error: End of file
             for i in range(2):
                 out, err = pyRunWithRetry.RunCommand(
-                    self.ppp, 60, self.rootdir, "input.inp"
+                    self.ppp, self.ppp_timeout, self.rootdir, "input.inp"
                 ).run_shell()
 
                 if "*END - NORMAL COMPLETION" not in out:

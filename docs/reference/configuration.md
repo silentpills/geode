@@ -96,6 +96,7 @@ PPP processing configuration.
 [ppp]
 ppp_path = /path/to/PPP_NRCAN
 ppp_exe = /path/to/PPP_NRCAN/source/ppp
+ppp_timeout = 900
 institution = Your Institution
 info = Your Group Name
 frames = IGS20,
@@ -107,6 +108,7 @@ atx = /path/to/resources/atx/igs20_2335_plus.atx
 |---------|-------------|----------|
 | `ppp_path` | PPP program directory | Yes |
 | `ppp_exe` | PPP executable path | Yes |
+| `ppp_timeout` | Positive, finite seconds per GPSPACE attempt; defaults to 900. Timed-out commands are retried twice. | No |
 | `institution` | Institution name for headers | Yes |
 | `info` | Group/division name | Yes |
 | `frames` | Comma-separated reference frames | Yes |

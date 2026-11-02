@@ -82,6 +82,9 @@ otlmodel = FES2014b
 ppp_path = /path/to/PPP_NRCAN
 # PPP executable
 ppp_exe = /path/to/PPP_NRCAN/source/ppp
+# Positive, finite timeout in seconds per GPSPACE attempt (default: 900).
+# A timed-out command is retried twice before processing fails.
+ppp_timeout = 900
 # Institution name for SINEX headers
 institution = Your Institution Name
 # Group/division information

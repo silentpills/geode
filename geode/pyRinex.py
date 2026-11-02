@@ -661,10 +661,8 @@ class ReadRinex(RinexRecord):
             )
 
     def ConvertRinex(self, to_version):
-        # only available to convert from 3 -> 2
+        # Convert the working file without retaining a stale cached representation.
         try:
-            # most programs still don't support RINEX 3 (partially implemented in this code)
-            # convert to RINEX 2.11 using gfzrnx_lx
             cmd = pyRunWithRetry.RunCommand(
                 "gfzrnx_lx -finp %s -fout %s.t -vo %i -f"
                 % (self.rinex, self.rinex, to_version),
@@ -678,12 +676,13 @@ class ReadRinex(RinexRecord):
 
             if "| E |" in err:
                 raise pyRinexExceptionBadFile(
-                    "gfzrnx_lx returned error converting to RINEX 2.11:\n" + err
+                    f"gfzrnx_lx returned error converting to RINEX {to_version}:\n"
+                    + err
                 )
 
             elif not os.path.exists(result_path):
                 raise pyRinexExceptionBadFile(
-                    "gfzrnx_lx failed to convert to RINEX 2.11:\n" + err
+                    f"gfzrnx_lx failed to convert to RINEX {to_version}:\n" + err
                 )
 
             # if all ok, move converted file to rinex_path
@@ -692,7 +691,9 @@ class ReadRinex(RinexRecord):
             # change version
             self.rinex_version = to_version
 
-            self.log_event("Origin file was RINEX 3 -> Converted to 2.11")
+            self.header = self.get_header()
+            self.read_data()
+            self.log_event(f"Converted RINEX to version {to_version}")
 
         except pyRunWithRetry.RunCommandWithRetryExeception as e:
             # catch the timeout except and pass it as a pyRinexException
@@ -1149,7 +1150,12 @@ class ReadRinex(RinexRecord):
         from geode import pyOptions, pyPPP
 
         rnx = ReadRinex(
-            self.NetworkCode, self.StationCode, self.rinex_path, allow_multiday=True
+            self.NetworkCode,
+            self.StationCode,
+            self.rinex_path,
+            allow_multiday=True,
+            # The caller already validated this file before optional windowing.
+            min_time_seconds=0,
         )
 
         config = pyOptions.ReadOptions("gnss_data.cfg")  # type: pyOptions.ReadOptions
@@ -1344,6 +1350,9 @@ class ReadRinex(RinexRecord):
             self.datetime_lastObs = end
             self.firstObs = start.strftime("%Y/%m/%d %H:%M:%S")
             self.lastObs = end.strftime("%Y/%m/%d %H:%M:%S")
+            # Header edits must retain the observations just written by GFZRNX.
+            self.header = self.get_header()
+            self.read_data()
         else:
             move(self.rinex_path + ".t", copyto)
 
@@ -1374,6 +1383,10 @@ class ReadRinex(RinexRecord):
         # delete the original file and replace with .t
         os.remove(copyto)
         move(copyto + ".t", copyto)
+
+        if copyto == self.rinex_path:
+            self.header = self.get_header()
+            self.read_data()
 
         self.log_event(
             "RINEX decimated to %is (applied to %s)" % (decimate_rate, str(copyto))
@@ -1412,8 +1425,8 @@ class ReadRinex(RinexRecord):
         if copyto == self.rinex_path:
             # reload information from this file
             self.parse_output(self.RunGfzrnx(), self.min_time_seconds)
-        else:
-            raise pyRinexException(err)
+            self.header = self.get_header()
+            self.read_data()
 
         self.log_event(
             "Removed systems %s (applied to %s)" % (",".join(systems), str(copyto))
