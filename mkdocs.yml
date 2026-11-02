@@ -32,6 +32,7 @@ nav:
   - Development:
     - Contributing: development/contributing.md
     - Operations: development/operations.md
+    - Dependency Triage: development/dependency-triage.md
     - Upstream Integration: development/upstream-integration.md
 
 markdown_extensions:
