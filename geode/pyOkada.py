@@ -235,32 +235,36 @@ class EarthquakeTable(object):
         displacements = []
 
         for etm in etms:
-            if etm["params"] is None:
+            try:
+                params = np.asarray(etm["params"], dtype=float)
+            except (TypeError, ValueError):
                 continue
 
-            if isinstance(etm["params"][0], list):
-                etm["params"] = [item for sublist in etm["params"] for item in sublist]
+            # ETM stores one row per component; legacy pyETM flattened those
+            # rows. Infer their width from the fitted parameters, since removed
+            # decays can leave the stored relaxation list out of date.
+            if params.ndim == 1:
+                if not params.size or params.size % 3:
+                    continue
+                params = params.reshape(3, -1)
+            elif params.ndim != 2 or params.shape[0] != 3 or not params.shape[1]:
+                continue
 
-            if etm["jump_type"] == CO_SEISMIC_JUMP:
-                displacements.append(
-                    {
-                        "NetworkCode": etm["NetworkCode"],
-                        "StationCode": etm["StationCode"],
-                        "n": etm["params"][0],
-                        "e": etm["params"][1],
-                        "u": etm["params"][2],
-                    }
-                )
-            else:
-                displacements.append(
-                    {
-                        "NetworkCode": etm["NetworkCode"],
-                        "StationCode": etm["StationCode"],
-                        "n": etm["params"][0],
-                        "e": etm["params"][1 + etm["len"]],
-                        "u": etm["params"][2 + 2 * etm["len"]],
-                    }
-                )
+            # The first coefficient is the coseismic displacement in both jump
+            # layouts. Inactive/unfit components can contain None or NaN.
+            neu = params[:, 0]
+            if np.isnan(neu).any():
+                continue
+
+            displacements.append(
+                {
+                    "NetworkCode": etm["NetworkCode"],
+                    "StationCode": etm["StationCode"],
+                    "n": neu[0],
+                    "e": neu[1],
+                    "u": neu[2],
+                }
+            )
 
         return sorted(displacements, key=lambda x: x["StationCode"])
 
