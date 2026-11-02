@@ -63,7 +63,6 @@ jobs:
     name: Container Security Scan
     runs-on: ubuntu-latest
     needs: build
-    continue-on-error: true  # Informational - base images often have CVEs we can't fix
     steps:
       - uses: actions/checkout@v6
 
@@ -71,21 +70,25 @@ jobs:
         run: docker build -f web/backend/Dockerfile -t gnss-backend .
 
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.76.1
           image-ref: gnss-backend
           format: table
           severity: HIGH,CRITICAL
-          exit-code: 1
+          # Findings remain informational; scanner/setup errors fail the job.
+          exit-code: '0'
 
       - name: Build frontend image
         run: docker build -t gnss-frontend ./web/frontend
 
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.76.1
           image-ref: gnss-frontend
           format: table
           severity: HIGH,CRITICAL
-          exit-code: 1
+          # Findings remain informational; scanner/setup errors fail the job.
+          exit-code: '0'

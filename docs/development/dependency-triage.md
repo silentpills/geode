@@ -1,7 +1,8 @@
 # Dependency triage: 2026-11-02
 
-Reviewed `dev` at `4d4ce3f`. This is an inventory and remediation plan, not a
-record of applied upgrades. Deployment exposure below describes the committed
+Reviewed `dev` at `4d4ce3f`. The inventory below is a snapshot; scanner remediation
+is recorded in section 1, while application dependency upgrades remain planned.
+Deployment exposure below describes the committed
 Dockerfiles and application paths; no running installation was inspected.
 
 ## Inventory and coverage
@@ -27,8 +28,8 @@ native libraries and a running deployment were not scanned in this triage.
 
 ## 1. Restore the container scanner
 
-Both scans in `.github/workflows/docker.yml` reference
-`aquasecurity/trivy-action@0.33.1`. The latest inspected
+At triage, both scans in `.github/workflows/docker.yml` referenced
+`aquasecurity/trivy-action@0.33.1`. The inspected
 [Docker run](https://github.com/silentpills/geode/actions/runs/41525124280) is green,
 but its [scan job](https://github.com/silentpills/geode/actions/runs/41525124280/job/125552954028)
 fails during setup because that action version no longer resolves. Job-wide
@@ -42,7 +43,7 @@ evidence of malicious execution was found; deleted history cannot be excluded.
 The separate [action-input injection advisory](https://github.com/aquasecurity/trivy-action/security/advisories/GHSA-9p44-j4g5-cfx5)
 has no identified untrusted-input path in this workflow's literal scan settings.
 
-Prepare this focused workflow change:
+The workflow now pins both scans to this action and binary:
 
 ```yaml
 uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -54,10 +55,10 @@ with:
 The SHA was verified against the signed, immutable
 [action release](https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0).
 The [binary release](https://github.com/aquasecurity/trivy/releases/tag/v0.76.1)
-is also immutable. Apply to both scans and remove job-wide
-`continue-on-error`. This keeps vulnerability findings informational while
-surfacing setup/tool failures. Verify that both actual scans complete before
-claiming image coverage.
+is also immutable. Job-wide `continue-on-error` has been removed. This keeps
+vulnerability findings informational while surfacing setup/tool failures.
+Static validation does not establish image coverage; verify that both actual
+scan steps complete in the workflow run.
 
 ## 2. Patch deployed Python dependencies
 
