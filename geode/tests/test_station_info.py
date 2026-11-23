@@ -455,3 +455,17 @@ def test_gamit_export_transliterates_text_without_changing_metadata():
     assert record.Comments == "Łódź Straße"
     assert record.to_database_dict()["DateEnd"] is None
     assert "StationName" not in record.to_database_dict()
+
+
+def test_archive_import_selects_station_from_source_records(monkeypatch):
+    from com import ScanArchive
+
+    inserted = []
+    monkeypatch.setattr(ScanArchive.dbConnection, "Cnn", lambda config: None)
+    monkeypatch.setattr(
+        StationInfo, "insert_station_info", lambda self, record: inserted.append(record)
+    )
+    line = TestStationInfoRecordParsing.STN_LIST_WITH_DAZ[0]
+    lines = [line.replace(" IGM1 ", " ABCD ", 1), line]
+    assert ScanArchive.insert_stninfo("tst", "igm1", lines) is None
+    assert [(r.NetworkCode, r.StationCode) for r in inserted] == [("tst", "igm1")]

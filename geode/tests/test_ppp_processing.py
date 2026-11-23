@@ -3,13 +3,46 @@
 import datetime
 import gzip
 import subprocess
+import sys
+from contextlib import nullcontext
+from inspect import signature
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from geode import pyOptions, pyPPP, pyRinex
 from geode.pyDate import Date
+
+
+@pytest.mark.parametrize(
+    "flags, expected", [([], 105), (["--solve_troposphere", "2"], 2)]
+)
+def test_locate_rinex_passes_scalar_troposphere_mode(
+    monkeypatch, tmp_path, flags, expected
+):
+    from com import LocateRinex
+
+    observation = tmp_path / "test0010.26o"
+    observation.touch()
+    monkeypatch.setattr(sys, "argv", ["LocateRinex", str(observation), *flags])
+    config = SimpleNamespace(options={}, sp3types=[], brdc_path="")
+    monkeypatch.setattr(pyOptions, "ReadOptions", lambda path: config)
+    monkeypatch.setattr(
+        pyRinex,
+        "ReadRinex",
+        lambda *a, **kw: nullcontext(SimpleNamespace(multiday=False)),
+    )
+    ppp_signature = signature(LocateRinex.execute_ppp)
+    process = Mock()
+    monkeypatch.setattr(LocateRinex, "execute_ppp", process)
+
+    LocateRinex.main()
+
+    process.assert_called_once()
+    options = ppp_signature.bind(*process.call_args.args, **process.call_args.kwargs)
+    assert options.arguments["solve_troposphere"] == expected
 
 
 @pytest.fixture

@@ -116,7 +116,6 @@ def main():
         "-st",
         "--solve_troposphere",
         type=int,
-        nargs=1,
         default=105,
         choices=(1, 2, 3, 4, 5, 102, 103, 104, 105),
         help="Solve for the tropospheric wet delay. Possible options are 1: do not solve, 2-5: solve "
