@@ -137,6 +137,14 @@ diagnostics and backup/restore procedures are in
 [web setup](../installation/web-interface.md) and
 [operations](../development/operations.md).
 
+## Combined constellation products
+
+For a subnet processed with multiple constellations, the combined binary
+solution is `glbf/hYYMMDD1200_<experiment>.glx`. For example, October 16,
+2023 produces `h2310161200_bbay.glx` for experiment `bbay`. Existing
+archives can have a day-of-year in that filename. GeoDE locates the single
+nonempty `h*.glx` in a subnet directory, so those files can keep their names.
+
 ## Review integrity before repairs
 
 Start with report modes and a bounded station/date selection:

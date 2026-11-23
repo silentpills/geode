@@ -219,7 +219,7 @@ class GamitTask(object):
     def combine_systems(self, results):
         # create a globk.cmd file for the combination
         expt = self.gamitopts["expt"]
-        hfile = f"h{str(self.date.year)[2:]}{self.date.month:02}{self.date.doy:02}1200_{expt}.glx"
+        hfile = f"h{self.date.datetime():%y%m%d}1200_{expt}.glx"
 
         try:
             globk_cmd = file_open(os.path.join(self.pwd_glbf, "globk.cmd"), "w")

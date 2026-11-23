@@ -503,6 +503,30 @@ def test_incomplete_subnet_ztd_keeps_whole_prior_day(
         assert db.execute(query).fetchall() == previous
 
 
+def test_multi_system_glx_uses_calendar_date(tmp_path, monkeypatch):
+    params = dict(
+        DirName="bbay",
+        date=Date(year=2023, doy=289),
+        orbits={},
+        gamitopts={"expt": "bbay", "systems": ["G", "E"]},
+    )
+    task = gamit_task.GamitTask(str(tmp_path), params, str(tmp_path))
+    products = tmp_path / "glbf"
+    products.mkdir()
+    name = "h2310161200_bbay.glx"
+    results = [dict(system=s, glbf=name) for s in ("G", "E")]
+    (products / "out.prt").write_text(
+        f"1 ../gsoln/G/{name} 1.0 0.0 0.1 -1.0 USED\n"
+        f"2 ../gsoln/E/{name} 4.0 0.0 0.2 -1.0 USED\n"
+    )
+    monkeypatch.setattr(task, "execute", lambda *args, **kwargs: None)
+    task.combine_systems(results)
+    assert f" out_glb {name}\n" in (products / "globk.cmd").read_text()
+    archived = products / "h23102891200_bbay.glx"
+    archived.write_bytes(b"legacy combined solution")
+    assert gamit_session.subnet_glx(products) == archived
+
+
 def test_globk_requires_one_glx_from_each_subnet(tmp_path):
     date = Date(year=2024, doy=100)
     destination = tmp_path / "combined"
