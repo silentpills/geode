@@ -279,9 +279,41 @@ def test_campaign_fences_stale_purge_and_overlapping_work(
                     pytest.fail("busy day admitted")
         with campaign.campaign_run(second, "geod", [date]) as current:
             with pytest.raises(RuntimeError, match="Superseded"):
-                ParallelGamit.purge_solution(str(tmp_path), "geod", date, old)
+                ParallelGamit.purge_solution(str(tmp_path), "geod", date, old, "TST")
             assert (solution / "retain.snx").read_bytes() == b"observations"
-            ParallelGamit.purge_solution(str(tmp_path), "geod", date, current)
+            # Both recorded and unrecorded dotted paths share this prefix.
+            paths = [
+                "geod.TST001",
+                "geod.TST002",
+                "geod.TST003",
+                "geod.extra",
+                ".geod.TST001.previous",
+            ]
+            for name in paths:
+                (tmp_path / name).mkdir()
+            db.execute(
+                "INSERT INTO gamit_subnets VALUES ('geod', 2024, 100, 1), ('geod', 2024, 100, 2), ('geod.TST002', 2024, 100, 0), ('geod.extra', 2024, 100, 0)"
+            )
+            with pytest.raises(RuntimeError, match="Ambiguous ownership"):
+                ParallelGamit.purge_solution(
+                    str(tmp_path), "geod", date, current, "TST"
+                )
+            assert all((tmp_path / name).exists() for name in paths)
+            assert solution.is_dir()
+            # Reconcile subnet 2 as belonging only to the independent dotted project.
+            db.execute(
+                """DELETE FROM gamit_subnets WHERE "Project"='geod' AND subnet=2"""
+            )
+            ParallelGamit.purge_solution(str(tmp_path), "geod", date, current, "TST")
+            assert not (tmp_path / "geod.TST001").exists()
+            assert not (tmp_path / ".geod.TST001.previous").exists()
+            assert all(
+                (tmp_path / name).exists()
+                for name in ("geod.TST002", "geod.TST003", "geod.extra")
+            )
+            assert db.execute(
+                'SELECT "Project" FROM gamit_subnets ORDER BY "Project"'
+            ).fetchall() == [("geod.TST002",), ("geod.extra",)]
             assert not solution.exists()
             assert not gamit_session.completed_session(second, solution, row_key)
 

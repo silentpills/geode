@@ -6,7 +6,6 @@ Author: Demian D. Gomez
 """
 
 import argparse
-import glob
 import math
 import os
 import random
@@ -156,42 +155,70 @@ def print_summary(stations, sessions, dates):
     return
 
 
-def purge_solution(pwd, project, date, run_id):
+def purge_solution(pwd, project, date, run_id, org):
     with active_day(project, date, run_id) as (cnn, _):
-        _purge_solution(cnn, pwd, project, date)
+        _purge_solution(cnn, Path(pwd), project, date, org)
 
 
-def _purge_solution(cnn, pwd, project, date):
-    # delete the main solution dir (may be entire GAMIT run or combination directory)
-    if not project or project in {".", ".."} or Path(project).name != project:
-        raise ValueError("Expected a single project name")
-    project_path = os.path.join(pwd, project)
-    if os.path.isdir(project_path):
-        shutil.rmtree(project_path)
+def _purge_solution(cnn, pwd, project, date, org):
+    for name in (project, org):
+        if not name or name in {".", ".."} or Path(name).name != name:
+            raise ValueError("Expected single project and organization names")
 
-    # possible subnetworks
-    for sub in glob.glob(glob.escape(project_path) + ".*"):
-        shutil.rmtree(sub)
-    # Interrupted directory swaps can leave complete previous results.
-    # Only this explicit project/day purge may discard them.
-    previous = os.path.join(pwd, "." + project + ".previous")
-    if os.path.isdir(previous):
-        shutil.rmtree(previous)
-    for previous in glob.glob(
-        os.path.join(glob.escape(pwd), "." + glob.escape(project) + ".*.previous")
-    ):
-        shutil.rmtree(previous)
-
-    # now remove the database entries
+    tables = (
+        "gamit_soln_excl",
+        "stacks",
+        "gamit_soln",
+        "gamit_stats",
+        "gamit_subnets",
+        "gamit_ztd",
+    )
+    # A dotted project name can look just like another project's subnet. Resolve
+    # known owners first, before removing any trees or database records.
+    lookups = []
+    for table in tables:
+        subnet = (
+            "subnet" if table in ("gamit_stats", "gamit_subnets") else "NULL::numeric"
+        )
+        lookups.append(
+            f'SELECT DISTINCT "Project" AS project, {subnet} AS subnet FROM {table} WHERE "Year"=%s AND "DOY"=%s'
+        )
+    lookups.append(
+        "SELECT project, NULL::numeric AS subnet FROM geode_compute.gamit_runs WHERE year=%s AND doy=%s"
+    )
+    rows = cnn.cnn.execute(
+        " UNION ".join(lookups), (date.year, date.doy) * len(lookups)
+    ).fetchall()
+    expected = {project}
+    other_projects = set()
+    other_subnets = []
+    for row in rows:
+        owner, subnet = row["project"], row["subnet"]
+        if owner == project:
+            if subnet is not None:
+                expected.add(f"{project}.{org}{int(subnet):03d}")
+        else:
+            other_projects.add(owner)
+            if subnet is not None:
+                other_subnets.append((owner + ".", f"{int(subnet):03d}"))
+    paths = []
+    for name in sorted(expected):
+        for path in (pwd / name, pwd / f".{name}.previous"):
+            if not path.is_dir():
+                continue
+            if name in other_projects or any(
+                name.startswith(prefix) and name.endswith(suffix)
+                for prefix, suffix in other_subnets
+            ):
+                raise RuntimeError(
+                    f"Ambiguous ownership of {path}; separate the two projects before purging"
+                )
+            paths.append(path)
+    for path in paths:
+        shutil.rmtree(path)
+    # Leave unrecorded subnets, similarly named projects, and failed attempts in place.
     with cnn.cnn.transaction():
-        for table in (
-            "gamit_soln_excl",
-            "stacks",
-            "gamit_soln",
-            "gamit_stats",
-            "gamit_subnets",
-            "gamit_ztd",
-        ):
+        for table in tables:
             cnn.cursor.execute(
                 f'DELETE FROM {table} WHERE "Year"=%s AND "DOY"=%s AND "Project"=%s',
                 (date.year, date.doy, project),
@@ -217,7 +244,11 @@ def purge_solutions(JobServer, args, dates, GamitConfig, run_id):
             )
 
             JobServer.submit(
-                pwd, GamitConfig.NetworkConfig.network_id.lower(), date, run_id
+                pwd,
+                GamitConfig.NetworkConfig.network_id.lower(),
+                date,
+                run_id,
+                GamitConfig.gamitopt["org"],
             )
 
         JobServer.wait()
