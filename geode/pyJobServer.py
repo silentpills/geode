@@ -1,195 +1,54 @@
-"""
-Project: Geodetic Database Engine (GeoDE)
-Date: 9/13/17 6:30 PM
-Author: Demian D. Gomez
+"""Submit GeoDE processing jobs serially or on a dedicated Celery queue."""
 
-This module handles the cluster nodes and checks all the necessary dependencies
-before sending jobs to each node
-"""
-
-import _thread
+import json
+import math
 import os
-import queue
+import socket
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from itertools import cycle
+from uuid import uuid4
 
-import dispy
-import dispy.httpd
-
-# deps
 from tqdm import tqdm
 
 
-def test_node(
-    check_gamit_tables=None,
-    check_archive=True,
-    check_executables=True,
-    check_atx=True,
-    software_sync=(),
+def check_processing_environment(
+    check_gamit_tables, check_archive, check_executables, check_atx
 ):
-    # test node: function that makes sure that all required packages and tools are present in the nodes
-    import os
-    import platform
-    import sys
-    import traceback
+    """Check the same local configuration and prerequisites the processing code will use."""
+    from contextlib import closing
+    from pathlib import Path
+    from shutil import which
+    from tempfile import TemporaryDirectory
 
-    def check_tab_file(tabfile, date):
-        if os.path.isfile(tabfile):
-            # file exists, check contents
-            with open(tabfile, "rt", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
+    from geode import dbConnection, pyDate, pyOptions, pyProducts
 
-            tabdate = pyDate.Date(mjd=lines[-1].split()[0])
-            if tabdate < date:
-                return " -- %s: Last entry in %s is %s but processing %s" % (
-                    platform.node(),
-                    tabfile,
-                    tabdate.yyyyddd(),
-                    date.yyyyddd(),
-                )
-            return []
-        else:
-            return " -- %s: Could not find file %s" % (platform.node(), tabfile)
+    config = pyOptions.ReadOptions("gnss_data.cfg")
+    with closing(dbConnection.Cnn("gnss_data.cfg", migrate=False)) as cnn:
+        cnn.query("SELECT count(*) FROM networks")
 
-    # BEFORE ANYTHING! check the python version
-    version = sys.version_info
-    # if version.major > 2 or version.minor < 7 or (version.micro < 12 and version.minor <= 7):
-    #     return ' -- %s: Incorrect Python version: %i.%i.%i. Recommended version >= 2.7.12' \
-    #            % (platform.node(), version.major, version.minor, version.micro)
-    if version.major < 3:
-        return (
-            " -- %s: Incorrect Python version: %i.%i.%i. Recommended version >= 3.0.0"
-            % (platform.node(), version.major, version.minor, version.micro)
-        )
+    Path("production").mkdir(exist_ok=True)
+    with TemporaryDirectory(dir="production", prefix="node_test_") as scratch:
+        if check_archive:
+            for directory in (config.archive_path, config.repository):
+                if not Path(directory).is_dir():
+                    raise FileNotFoundError(
+                        f"Cannot access the processing archive or repository: {directory}"
+                    )
+            date = pyDate.Date(year=2010, doy=1)
+            with pyProducts.GetBrdcOrbits(config.brdc_path, date, scratch):
+                pass
+            with pyProducts.GetSp3Orbits(
+                config.sp3_path, date, config.sp3types, scratch
+            ):
+                pass
 
-    # start importing the modules needed
-    try:
-        print(" >> Testing python imports")
-        import traceback
-
-        # deps
-        # app
-        from geode import dbConnection, pyDate, pyOptions, pyProducts, pyRunWithRetry
-
-        print(" -- Done")
-
-    except:
-        return " -- %s: Problem found while importing modules:\n%s" % (
-            platform.node(),
-            traceback.format_exc(),
-        )
-
-    try:
-        if len(software_sync) > 0:
-            print(" >> Syncing directories")
-            # synchronize directories listed in the src and dst arguments
-            from dirsync import sync
-
-            for source_dest in software_sync:
-                if isinstance(source_dest, str) and "," in source_dest:
-                    s = source_dest.split(",")[0].strip()
-                    d = source_dest.split(",")[1].strip()
-
-                    print("    -- Synchronizing %s -> %s" % (s, d))
-
-                    updated = sync(s, d, "sync", purge=True, create=True)
-
-                    for f in updated:
-                        print("    -- Updated %s" % f)
-
-            print(" -- Done")
-
-    except:
-        return " -- %s: Problem found while synchronizing software:\n%s " % (
-            platform.node(),
-            traceback.format_exc(),
-        )
-
-    # continue with a test SQL connection
-    # make sure that the gnss_data.cfg is present
-    try:
-        print(" >> Testing database connection")
-        cnn = dbConnection.Cnn("gnss_data.cfg")
-
-        q = cnn.query("SELECT count(*) FROM networks")
-        print(" -- Done")
-    except:
-        return " -- %s: Problem found while connecting to postgres:\n%s " % (
-            platform.node(),
-            traceback.format_exc(),
-        )
-
-    # make sure we can create the production folder
-    try:
-        print(" >> Testing access to production dir")
-        test_dir = os.path.join("production/node_test")
-        if not os.path.exists(test_dir):
-            os.makedirs(test_dir)
-
-        print(" -- Done")
-    except:
-        return " -- %s: Could not create production folder:\n%s " % (
-            platform.node(),
-            traceback.format_exc(),
-        )
-
-    # test
-    try:
-        print(" >> Testing gnss_data.cfg file access")
-        Config = pyOptions.ReadOptions("gnss_data.cfg")
-        print(" -- Done")
-    except:
-        return (
-            " -- %s: Problem while reading config file and/or testing archive access:\n%s"
-            % (platform.node(), traceback.format_exc())
-        )
-
-    if check_archive:
-        print(" >> Testing access to archive %s" % Config.archive_path)
-        # check that all paths exist and can be reached
-        if not os.path.exists(Config.archive_path):
-            return " -- %s: Could not reach archive path %s" % (
-                platform.node(),
-                Config.archive_path,
-            )
-        print(" -- Done")
-
-        print(" >> Testing access to repository %s" % Config.repository)
-        if not os.path.exists(Config.repository):
-            return " -- %s: Could not reach repository path %s" % (
-                platform.node(),
-                Config.repository,
-            )
-        print(" -- Done")
-
-        # pick a test date to replace any possible parameters in the config file
-        date = pyDate.Date(year=2010, doy=1)
-        try:
-            print(" >> Testing access to broadcast orbits %s" % Config.brdc_path)
-            brdc = pyProducts.GetBrdcOrbits(Config.brdc_path, date, test_dir)
-            print(" -- Done")
-        except:
-            return (
-                " -- %s: Problem while testing the broadcast ephemeris archive (%s) access:\n%s"
-                % (platform.node(), Config.brdc_path, traceback.format_exc())
-            )
-
-        try:
-            print(" >> Testing access to precise orbits %s" % Config.sp3_path)
-            sp3 = pyProducts.GetSp3Orbits(
-                Config.sp3_path, date, Config.sp3types, test_dir
-            )
-            print(" -- Done")
-        except:
-            return (
-                " -- %s: Problem while testing the sp3 orbits archive (%s) access:\n%s"
-                % (platform.node(), Config.sp3_path, traceback.format_exc())
-            )
-
+    files = []
     if check_executables:
-        # check that all executables and GAMIT bins are in the path
-        for prg in (
+        for program in (
             "crz2rnx",
             "crx2rnx",
             "rnx2crx",
@@ -202,151 +61,46 @@ def test_node(
             "sed",
             "compress",
         ):
-            print(" >> Testing %s" % prg)
-            stdout, _ = pyRunWithRetry.RunCommand("which " + prg, 10).run_shell()
-            if not stdout.strip():
-                return " -- %s: Could not find path to %s" % (platform.node(), prg)
-        print(" -- Done")
-
-        # check grdtab and ppp from the config file
-        for opt in ("grdtab", "otlgrid", "ppp_exe"):
-            path = Config.options[opt]
-            print(" >> Testing access to %s" % path)
-            if not os.path.isfile(path):
-                return " -- %s: Could not find %s in %s" % (platform.node(), opt, path)
-        print(" -- Done")
-
-        ppp_path = Config.options["ppp_path"]
-        for f in (
-            "gpsppp.stc",
-            "gpsppp.svb_gps_yrly",
-            "gpsppp.flt",
-            "gpsppp.stc",
-            "gpsppp.met",
-        ):
-            print(" >> Testing access to %s" % f)
-            if not os.path.isfile(os.path.join(ppp_path, f)):
-                return " -- %s: Could not find %s in %s" % (
-                    platform.node(),
-                    f,
-                    ppp_path,
+            if which(program) is None:
+                raise FileNotFoundError(
+                    f"Missing processing command on the worker PATH: {program}"
                 )
-        print(" -- Done")
-
-    if check_atx:
-        for frame in Config.options["frames"]:
-            print(" >> Testing access to %s %s" % (frame, frame["atx"]))
-            if not os.path.isfile(frame["atx"]):
-                return " -- %s: Could not find atx in %s" % (
-                    platform.node(),
-                    frame["atx"],
-                )
-        print(" -- Done")
-
-    if check_gamit_tables is not None:
-        # check the gamit tables if not none
-
-        date = check_gamit_tables[0]
-        eop = check_gamit_tables[1]
-
-        gg = os.path.expanduser("~/gg")
-        tables = os.path.expanduser("~/gg/tables")
-
-        if not os.path.isdir(gg):
-            return " -- %s: Could not GAMIT installation dir (gg)" % (platform.node())
-
-        elif not os.path.isdir(tables):
-            return " -- %s: Could not GAMIT tables dir (gg)" % (platform.node())
-
-        # DDG: deprecated -> GAMIT now uses a single nbody file (binary)
-        # for t_name in ('luntab.' + date.yyyy() + '.J2000',
-        #               'soltab.' + date.yyyy() + '.J2000',
-        #               'ut1.' + eop,
-        #               # leapseconds
-        #               # vmf1
-        #               'pole.' + eop
-        #               ):
-        #    result = check_tab_file(os.path.join(tables, t_name), date)
-        #    if result:
-        #        return result
-
-        # fes_cmc consistency
-
-    return " -- %s: Test passed!" % platform.node()
-
-
-def setup(modules):
-    """
-    function to import modules in the nodes
-    :return: 0
-    """
-    from tqdm import tqdm
-
-    tqdm.write(" >> Initializing node...")
-    for module in modules:
-        # create a global object containing our module
-        # DDG: to support imports like geode.pyDate, ignoring the geode and only accessing pyDate
-        # DDG: new behavior: if module.submodule is called, import the submodule as a global
-        if "." in module:
-            module_obj = __import__(module, fromlist=[None])
-            globals()[module.split(".")[-1]] = module_obj
-            tqdm.write(
-                " >> Importing module %s as %s" % (module, module.split(".")[-1])
+        files.extend(
+            Path(config.options[key]) for key in ("grdtab", "otlgrid", "ppp_exe")
+        )
+        files.extend(
+            Path(config.options["ppp_path"]) / filename
+            for filename in (
+                "gpsppp.stc",
+                "gpsppp.svb_gps_yrly",
+                "gpsppp.flt",
+                "gpsppp.met",
             )
-        else:
-            module_obj = __import__(module)
-            globals()[module] = module_obj
-            tqdm.write(" >> Importing module %s" % module)
+        )
+    if check_atx:
+        files.extend(Path(frame["atx"]) for frame in config.Frames)
+    for path in files:
+        if not path.is_file():
+            raise FileNotFoundError(f"Cannot access required processing file: {path}")
+    if check_gamit_tables is not None and not Path("~/gg/tables").expanduser().is_dir():
+        raise FileNotFoundError("Cannot access GAMIT tables in ~/gg/tables")
 
-    return 0
+
+@dataclass
+class Job:
+    id: str
+    result: object = None
+    exception: str | None = None
+    ip_addr: str | None = None
+
+
+@dataclass
+class Worker:
+    name: str
+    avail_cpus: int
 
 
 class JobServer:
-    def check_cluster(self, status, node, job):
-        if status == dispy.DispyNode.Initialized:
-            with self._node_init_lock:
-                print(
-                    " -- Checking node %s (%i CPUs)..." % (node.name, node.avail_cpus)
-                )
-
-                try:
-                    self.cluster.send_file("gnss_data.cfg", node)
-                except Exception as e:
-                    print(" -- %s: Could not send gnss_data.cfg: %s" % (node.name, e))
-                    return
-
-                job = self.cluster.submit_node(
-                    node,
-                    self.check_gamit_tables,
-                    self.check_archive,
-                    self.check_executables,
-                    self.check_atx,
-                    self.software_sync,
-                )
-
-                if job is None:
-                    print(
-                        " -- %s: submit_node returned None (node may be unavailable)"
-                        % node.name
-                    )
-                    return
-
-                # poll with timeout instead of cluster.wait() to avoid hanging on a dead node
-                deadline = time.monotonic() + 60
-                while job.status not in (
-                    dispy.DispyJob.Finished,
-                    dispy.DispyJob.Cancelled,
-                    dispy.DispyJob.Abandoned,
-                    dispy.DispyJob.Terminated,
-                ):
-                    if time.monotonic() > deadline:
-                        print(" -- %s: test job timed out, skipping node" % node.name)
-                        return
-                    time.sleep(0.5)
-
-                self.result.append(job.result)
-                self.nodes.append(node)
-
     def __init__(
         self,
         Config,
@@ -357,114 +111,76 @@ class JobServer:
         run_parallel=True,
         software_sync=(),
     ):
-        """
-        initialize the jobserver
-        :param Config: pyOptions.ReadOptions instance
-        :param check_gamit_tables: check or not the tables in GAMIT
-        :param check_archive: check if can access archive files and folder structure
-        :param run_parallel: override the configuration in gnss_data.cfg
-        :param software_sync: list of strings with remote and local paths of software to be synchronized
-        """
-        self.check_gamit_tables = check_gamit_tables
-        self.check_archive = check_archive
-        self.check_executables = check_executables
-        self.check_atx = check_atx
-        self.software_sync = software_sync
-
-        self.nodes = []
-        self.result = []
-        self.jobs = []
-        self._node_init_lock = threading.Lock()
         self.run_parallel = Config.run_parallel and run_parallel
-        self.delay = Config.cluster_delay
-        self.verbose = False
-        self.close = False
-        # variable with ip address for multi-homed systems
-        self.ip_address = Config.options["ip_address"]
-
-        # vars to store the http_server and the progress bar (if needed)
-        self.progress_bar = None
-        self.http_server = None
-        self.callback = None
-        self.function = None
-        self.modules = []
-
-        self.on_nodes_changed = None
-        self.job_runner_inbox = queue.PriorityQueue()
-        self.node_cleanup = None
-
-        tqdm.write(" ==== Starting JobServer(dispy) ====")
-
-        # check that the run_parallel option is activated
+        self.checks = (check_gamit_tables, check_archive, check_executables, check_atx)
+        self.jobs = {}
+        self.condition = threading.Condition()
+        self.executor = None
+        self.collector = None
+        self.failures = []
+        self.open = False
+        self.cancelling = False
+        self.batch_id = str(uuid4())
+        self.timeout = float(os.getenv("GEODE_JOB_TIMEOUT_SECONDS", "86400"))
+        if self.timeout <= 0 or not math.isfinite(self.timeout):
+            raise ValueError("GEODE_JOB_TIMEOUT_SECONDS must be positive")
         if self.run_parallel:
-            node_list = Config.options["node_list"]
-            if node_list is None or not node_list.strip():
-                # no explicit list, find all
-                servers = ["*"]
-            else:
-                # use the provided explicit list of nodes
-                servers = [n for n in Config.options["node_list"].split(",") if n]
+            if software_sync:
+                raise ValueError(
+                    "Provision GAMIT tools on the worker and remove gamit_remote_local mappings"
+                )
+            from geode import compute_wire
+            from geode.compute import QUEUE, app
 
-            # initialize the cluster
-            # if explicitly declared, then we might have a multi-homed computer system
-            self.cluster = dispy.JobCluster(
-                test_node,
-                servers,
-                recover_file="pg.dat",
-                pulse_interval=10,
-                ping_interval=10,
-                cluster_status=self.check_cluster,
-                host=self.ip_address
-                if type(self.ip_address) is list or self.ip_address is None
-                else [self.ip_address],
+            self.wire_checks = json.dumps(
+                compute_wire.encode(self.checks), allow_nan=False
             )
 
-            # discover the available nodes
-            self.cluster.discover_nodes(servers)
-
-            # wait for all nodes
-            tqdm.write(" >> Waiting %d seconds to discover all nodes... " % self.delay)
-            time.sleep(self.delay)
-
-            # if no nodes were found, stop
-            if not len(self.nodes):
-                print(
-                    " >> No nodes could be found. Check ip_address in gnss_data.cfg if cluster has more than one "
-                    "Ethernet card and check the node_list to make sure you have the correct IP addresses."
+            inspect = app.control.inspect(timeout=2)
+            queues = inspect.active_queues() or {}
+            stats = inspect.stats() or {}
+            self.nodes = [
+                Worker(
+                    name, stats.get(name, {}).get("pool", {}).get("max-concurrency", 1)
                 )
-                # terminate execution if problems were found
-                self.cluster.close()
-                os._exit(1)
-
-            for r in self.result:
-                if r is None or "Test passed!" not in r:
-                    print(
-                        r
-                        if r is not None
-                        else " -- Node returned no result (job crashed on the remote node)"
-                    )
-                    print(
-                        " >> Errors were encountered during initialization. Check messages."
-                    )
-                    # terminate execution if problems were found
-                    self.cluster.close()
-                    os._exit(1)
-
-            self.cluster.close()
+                for name, subscriptions in queues.items()
+                if any(q["name"] == QUEUE for q in subscriptions)
+            ]
+            if not self.nodes:
+                raise RuntimeError(f"No Celery worker is consuming the {QUEUE} queue")
+            self._verify_workers()
+            self.destinations = cycle(
+                node.name for node in self.nodes for _ in range(max(node.avail_cpus, 1))
+            )
         else:
-            print(" >> Parallel processing deactivated by user")
-            r = test_node(
-                check_gamit_tables=check_gamit_tables,
-                check_archive=check_archive,
-                check_executables=check_executables,
-                check_atx=check_atx,
-            )
-            if r is None or "Test passed!" not in r:
-                print(r if r is not None else " -- test_node returned no result")
-                print(
-                    " >> Errors were encountered during initialization. Check messages."
+            self.nodes = [Worker(socket.gethostname(), 1)]
+            check_processing_environment(*self.checks)
+
+    def _verify_workers(self):
+        from celery.utils.nodenames import worker_direct
+
+        from geode import compute_receipts
+        from geode.compute import preflight
+
+        with compute_receipts.preflight_challenge() as challenge:
+            deadline = time.monotonic() + 60
+            handles = [
+                (
+                    node,
+                    preflight.apply_async(
+                        args=(self.batch_id, self.wire_checks, challenge),
+                        queue=worker_direct(node.name),
+                        expires=60,
+                    ),
                 )
-                os._exit(1)
+                for node in self.nodes
+            ]
+            for node, handle in handles:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or handle.get(timeout=remaining) != node.name:
+                    raise RuntimeError(
+                        f"Worker preflight failed or timed out for {node.name}"
+                    )
 
     def create_cluster(
         self,
@@ -477,239 +193,243 @@ class JobServer:
         on_nodes_changed=None,
         node_setup=None,
         node_cleanup=None,
+        dependencies=(),
     ):
-        self.jobs = []
-        self.callback = callback
+        # Existing CLI commands can run several different operations in sequence.
+        self.close_cluster()
         self.function = function
-        self.verbose = verbose
-        self.close = True
-        self.on_nodes_changed = on_nodes_changed
-        self.node_cleanup = node_cleanup
-
-        # check that the modules exist and that there are no typos passed
-        try:
-            setup(modules)
-        except Exception as e:
-            tqdm.write(
-                "There were problems during module imports in create_cluster: " + str(e)
-            )
-            os._exit(1)
-
-        if not self.run_parallel:
-            if node_setup:
-                node_setup()
-            _thread.start_new_thread(self._job_runner_thread, ())
-        else:
-            # DDG: NodeAllocate is used to pass the arguments to setup during node initialization
-            self.cluster = dispy.JobCluster(
-                function,
-                [
-                    dispy.NodeAllocate(
-                        node.ip_addr, setup_args=() if node_setup else (modules,)
-                    )
-                    for node in self.nodes
-                ],
-                list(deps),
-                callback,
-                self.cluster_status,
-                pulse_interval=10,
-                ping_interval=10,
-                # Note, exceptions in setup seems to be swallowed up and
-                # never shown.
-                setup=node_setup or setup,
-                cleanup=node_cleanup or True,
-                loglevel=dispy.logger.CRITICAL,
-                # if communication is lost to a node, his jobs will be
-                # automatically rescheduled to another one.. (but
-                # jobs must be reentrant! Because if rescheduled and the
-                # disconnected node is really alive (temporal netsplit) the
-                # job will run multiple times and maybe in parallel)
-                reentrant=True,
-                host=self.ip_address,
-            )
-
-            self.http_server = dispy.httpd.DispyHTTPServer(self.cluster, poll_sec=2)
-
-            # wait for all nodes to be created
-            tqdm.write(
-                " >> Waiting %d seconds to initialize all nodes... " % self.delay
-            )
-            time.sleep(self.delay)
-
+        self.callback = callback
         self.progress_bar = progress_bar
-
-    def submit(self, *args):
-        """
-        function to submit jobs to dispy. If run_parallel == False, the jobs are executed
-        :param args:
-        :return:
-        """
+        self.verbose = verbose
+        self.node_cleanup = node_cleanup
         if self.run_parallel:
-            self.jobs.append(self.cluster.submit(*args))
-        # if no-parallel was invoked, execute the procedure manually and synchronously
-        elif not self.callback:
-            self.function(*args)
-        else:
-            job = dispy.DispyJob(None, args, ())
-            try:
-                job.result = self.function(*args)
-                if self.progress_bar is not None:
-                    self.progress_bar.update()
-            except Exception as e:
-                job.exception = e
-            self.callback(job)
+            from geode.compute import operation_name
 
-    def submit_async(self, *args):
-        # If run_parallel == True, works the same as the submit() method
-        # If run_parallel == False, then the job will be run asynchronously in a job_runner
-        # thread.
-        # TODO: The submit() method must be deprecated and replaced with this method after we
-        # make sure no code depends on submit() synchronous behavior. So every job submitted
-        # will run asynchronously no matter run_parallel value and no different running semantics
-        # will be used.
+            self.operation = operation_name(function)
+            if node_setup or node_cleanup:
+                raise ValueError(
+                    "Configure worker setup/cleanup in the worker installation"
+                )
+        elif node_setup:
+            node_setup()
+        self.cancelling = False
+        self.open = True
         if self.run_parallel:
-            job = self.cluster.submit(*args)
-            self.jobs.append(job)
-        else:
-            # dispy will a sign a job.id automatically
-            job = dispy.DispyJob(None, args, ())
-            self.job_runner_inbox.put((1, job, args))
+            self.collector = threading.Thread(
+                target=self._collect, name="geode-results", daemon=True
+            )
+            self.collector.start()
+        if on_nodes_changed:
+            on_nodes_changed(self.nodes)
+
+    def _complete(self, job, infrastructure_error=None):
+        try:
+            if self.cancelling:
+                return
+            if infrastructure_error:
+                with self.condition:
+                    self.failures.append(infrastructure_error)
+            if self.progress_bar is not None:
+                self.progress_bar.update()
+            if self.callback:
+                self.callback(job)
+            elif job.exception and not infrastructure_error:
+                raise RuntimeError(f"Processing job {job.id} failed: {job.exception}")
+        except Exception as exc:
+            with self.condition:
+                self.failures.append(exc)
+        finally:
+            with self.condition:
+                self.jobs.pop(job.id, None)
+                self.condition.notify_all()
+
+    def _local(self, job, arguments):
+        try:
+            job.result = self.function(*arguments)
+        except Exception:
+            job.exception = traceback.format_exc()
+        self._complete(job)
+
+    def _remote(self, arguments):
+        from celery.utils.nodenames import worker_direct
+
+        from geode import compute_receipts, compute_wire
+        from geode.compute import execute
+
+        encoded = compute_wire.encode(arguments)
+        job = Job(str(uuid4()))
+        fingerprint = compute_wire.fingerprint(
+            self.operation, encoded, self.wire_checks
+        )
+        label = None
+        if self.operation == "com.PlotETM.process_etm_station":
+            station = arguments[0]
+            label = f"{station['NetworkCode']}.{station['StationCode']}"
+        elif self.operation == "com.ParallelGamit.run_gamit_session":
+            label = arguments[0]["date"].yyyyddd()
+        compute_receipts.register(job.id, self.operation, fingerprint, label)
+        tqdm.write(f" >> {self.operation} job {job.id}")
+        try:
+            handle = execute.apply_async(
+                args=(self.operation, encoded, self.batch_id, self.wire_checks),
+                task_id=job.id,
+                queue=worker_direct(next(self.destinations)),
+                argsrepr=f"({self.operation}, <processing data>)",
+            )
+        except Exception as exc:
+            # Publishing can fail *after* Redis has accepted the message.
+            raise RuntimeError(
+                f"Publication unconfirmed for {job.id}; check its PostgreSQL receipt"
+            ) from exc
+        with self.condition:
+            if self.cancelling or not self.open:
+                self._cancel_remote(job, handle)
+                raise RuntimeError(f"Processing batch closed while publishing {job.id}")
+            self.jobs[job.id] = (job, handle, time.monotonic() + self.timeout)
+            self.condition.notify_all()
         return job
 
-    def _job_runner_thread(self):
+    def _collect(self):
+        from celery.exceptions import TimeoutError as CeleryTimeout
+        from kombu.exceptions import OperationalError
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import TimeoutError as RedisTimeout
+
+        from geode.compute_wire import decode
+
         while True:
-            (prio, job, args) = self.job_runner_inbox.get()
-
-            if "CLOSE" == job:
-                return
-
-            try:
+            with self.condition:
+                self.condition.wait_for(lambda: self.jobs or not self.open)
+                if not self.open:
+                    return
+                items = list(self.jobs.values())
+            for job, handle, deadline in items:
+                if self.cancelling:
+                    break
+                error = None
                 try:
-                    job.result = self.function(*args)
-                    if self.progress_bar is not None:
-                        self.progress_bar.update()
-                except:
+                    if time.monotonic() >= deadline:
+                        self._cancel_remote(job, handle)
+                        raise TimeoutError(
+                            f"Timed out waiting for {job.id}; inspect its PostgreSQL receipt before resubmitting"
+                        )
+                    if not handle.ready():
+                        continue
+                    output = handle.get(propagate=True, timeout=1)
+                    job.ip_addr = output["worker"]
+                    job.result = decode(output["result"])
+                except (
+                    CeleryTimeout,
+                    OperationalError,
+                    RedisConnectionError,
+                    RedisTimeout,
+                ):
+                    if time.monotonic() < deadline:
+                        continue
                     job.exception = traceback.format_exc()
-                self.callback(job)
-            except:
-                tqdm.write(
-                    "WARNING: Exception running job callback: " + traceback.format_exc()
+                    error = RuntimeError(
+                        f"Result unavailable for {job.id}; check its PostgreSQL receipt"
+                    )
+                except Exception:
+                    job.exception = traceback.format_exc()
+                    error = RuntimeError(
+                        f"Unable to confirm successful execution of job {job.id}: {job.exception}"
+                    )
+                self._complete(job, error)
+            with self.condition:
+                if self.open and self.jobs:
+                    self.condition.wait(timeout=0.25)
+
+    def submit(self, *args):
+        if self.cancelling or not self.open:
+            raise RuntimeError("Processing batch is closed")
+        if self.run_parallel:
+            return self._remote(args)
+        job = Job(str(uuid4()), ip_addr=socket.gethostname())
+        if not self.callback:
+            job.result = self.function(*args)
+            if self.progress_bar is not None:
+                self.progress_bar.update()
+            return job
+        self._local(job, args)
+        return job
+
+    def submit_async(self, *args):
+        if self.cancelling or not self.open:
+            raise RuntimeError("Processing batch is closed")
+        if self.run_parallel:
+            return self._remote(args)
+        job = Job(str(uuid4()), ip_addr=socket.gethostname())
+        with self.condition:
+            if self.cancelling or not self.open:
+                raise RuntimeError("Processing batch is closed")
+            if self.executor is None:
+                self.executor = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="geode-local"
                 )
+            self.jobs[job.id] = self.executor.submit(self._local, job, args)
+        return job
 
     def wait(self):
-        """
-        wrapped function to wait for cluster execution
-        :return: none
-        """
-        if self.run_parallel:
-            tqdm.write(
-                " -- Waiting for jobs to finish (no less than %d seconds)..."
-                % self.delay
-            )
-            try:
-                self.cluster.wait()
-                # let the process trigger cluster_status before letting the calling proc close the progress bar
-                time.sleep(self.delay)
-            except KeyboardInterrupt:
-                for job in self.jobs:
-                    if job.status in (dispy.DispyJob.Running, dispy.DispyJob.Created):
-                        self.cluster.cancel(job)
-                self.cluster.shutdown()
+        try:
+            with self.condition:
+                self.condition.wait_for(lambda: not self.jobs)
+                if self.failures:
+                    exc, *others = self.failures
+                    self.failures.clear()
+                    for other in others:
+                        exc.add_note(str(other))
+                    raise exc
+        except KeyboardInterrupt:
+            self._cancel_pending()
+            raise
 
-    def close_cluster(self):
-        if self.run_parallel and self.close:
-            tqdm.write("")
-            self.http_server.shutdown()
-            self.cleanup()
+    @staticmethod
+    def _cancel_remote(job, handle):
+        from geode import compute_receipts
 
-    def cluster_status(self, status, node, job):
-        """Called by dispy on cluster events"""
-        # see https://dispy.org/examples.html#process-status-notifications
-        J = dispy.DispyJob
-        N = dispy.DispyNode
-
-        # update the status in the http_server
-        self.http_server.cluster_status(
-            self.http_server._clusters[self.cluster.name], status, node, job
+        if compute_receipts.cancel(job.id):
+            handle.revoke(terminate=False)
+        tqdm.write(
+            f" >> Check PostgreSQL receipt {job.id} for the cancellation outcome"
         )
 
-        s = status
-        if not job:
-            # Node status change
-            if N.Initialized == s:
-                tqdm.write(
-                    " -- Node %s initialized with %i CPUs"
-                    % (node.name, node.avail_cpus)
-                )
-                # test node to make sure everything works
-                self.cluster.send_file("gnss_data.cfg", node)
-                self.nodes.append(node)
-                if self.on_nodes_changed:
-                    self.on_nodes_changed(self.nodes)
-
-            elif N.Closed == s:
-                self.nodes.remove(node)
-                if self.on_nodes_changed:
-                    self.on_nodes_changed(self.nodes)
+    def _cancel_pending(self):
+        with self.condition:
+            self.cancelling = True
+            pending = list(self.jobs.values())
+            self.jobs.clear()
+            self.condition.notify_all()
+        if self.run_parallel:
+            for job, handle, _deadline in pending:
+                # Do not terminate an in-flight archive write or GAMIT process.
+                self._cancel_remote(job, handle)
         else:
-            # Job status change
-            if J.Finished == s:
-                if self.verbose:
-                    tqdm.write(" -- Job %i finished successfully" % job.id)
+            for future in pending:
+                future.cancel()
 
-            elif J.Abandoned == s:
-                # If a node becomes offline and the cluster was created with reentrant=False,
-                # their jobs will be reported as Abandoned. If reentrant=True, they will be
-                # automatically redirected to other nodes by dispy.
-                # always print abandoned jobs
-                tqdm.write(
-                    " -- Job %04i (%s) was reported as abandoned at node %s -> resubmitting"
-                    % (job.id, str(job.args), node.name)
-                )
-
-            elif J.Created == s:
-                if self.verbose:
-                    tqdm.write(" -- Job %i has been created" % job.id)
-
-            elif J.Terminated == s:
-                tqdm.write(
-                    " -- Job %04i has been terminated with the following exception: "
-                    % job.id
-                )
-                tqdm.write(str(job.exception))
-
-            elif J.Cancelled == s:
-                tqdm.write(
-                    " -- Job %04i has been cancelled with the following exception: "
-                    % job.id
-                )
-                tqdm.write(str(job.exception))
-
-            #
-            if s in (J.Finished, J.Terminated) and self.progress_bar is not None:
-                self.progress_bar.update()
-
-            if s in (J.Finished, J.Abandoned, J.Terminated, J.Cancelled):
-                try:
-                    self.jobs.remove(job)
-                except:
-                    pass
-
-    def cleanup(self):
-        if not self.run_parallel:
+    def close_cluster(self):
+        if not self.open:
+            return
+        try:
+            self.wait()
+        finally:
+            with self.condition:
+                self.open = False
+                self.condition.notify_all()
+            if self.collector:
+                self.collector.join()
+                self.collector = None
+            if self.executor:
+                self.executor.shutdown()
+                self.executor = None
             if self.node_cleanup:
                 self.node_cleanup()
-            self.job_runner_inbox.put((0, "CLOSE", None))
-        elif self.close:
-            self.cluster.print_status()
-            self.cluster.close()
-            self.close = False
-
-    def __del__(self):
-        self.cleanup()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.cleanup()
 
     def __enter__(self):
         return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self._cancel_pending()
+        self.close_cluster()

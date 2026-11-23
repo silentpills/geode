@@ -59,15 +59,14 @@ commitizen = "*"
 geode-gnss = { path = ".", editable = true }
 country-converter = "*"
 dirsync = "*"
-dispy = "*"
+celery = "~=5.5.0"
+redis = "~=5.2.0"
 earthscope-cli = "*"
 earthscope-sdk = "*"
 hdf5storage = "*"
 munch = "*"
-pycos = "*"
 simplekml = "*"
 usgs-libcomcat = "*"
-legacy-cgi = ">=2.6.4, <3"
 python-dotenv = ">=1.0.0"
 
 [feature.reports.pypi-dependencies]
@@ -93,6 +92,8 @@ mkdocs-material = "*"
 pymdown-extensions = "*"
 
 [tasks]
+"compute:worker" = "celery -A geode.compute:app worker -Q geode.compute --hostname=compute@%h --concurrency=1 --loglevel=INFO"
+"compute:status" = "python -m geode.compute_receipts"
 # Testing
 test = { cmd = "pytest", depends-on = [{ task = "_postgres", environment = "postgres" }] }
 "test:api" = { cmd = "pytest geode/tests/test_antenna_api.py geode/tests/test_database_bootstrap.py", depends-on = [{ task = "_postgres", environment = "postgres" }] }
@@ -134,8 +135,6 @@ django-cors-headers = "==4.3.1"
 django-cleanup = "==8.1.0"
 drf-spectacular = "==0.28.0"
 drf-standardized-errors = "==0.13.0"
-celery = "~=5.5.0"
-redis = "~=5.2.0"
 
 # Explicit backend runtime imports, shared by Docker and the web test environment.
 gunicorn = ">=23,<24"

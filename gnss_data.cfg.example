@@ -30,13 +30,8 @@ media = /path/to/media
 # Path to format scripts for data download processing (optional)
 format_scripts_path = /path/to/format_scripts
 
-# Parallel processing settings
-parallel = True
-cpus = 4
-# Delay between cluster job submissions (seconds)
-cluster_delay = 90
-# Comma-separated list of processing node hostnames
-node_list = node1,node2,node3
+# Serial processing works without a broker. Set True after starting compute:worker.
+parallel = False
 
 # Orbit file locations (use path variables as needed)
 # Broadcast ephemeris

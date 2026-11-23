@@ -28,10 +28,8 @@ dependencies = [
     "numpy>=1.26.4",
     "pandas",
     "tqdm>=4.66.5",
-    "dispy",
-    "legacy-cgi; python_version >= '3.13'",
+    "celery[redis]~=5.5.0",
     "psycopg[binary]>=3.1.8",
-    "pycos",
     "country-converter",
     "charset-normalizer>=3.4.4",
     "earthscope-cli>=0.8.2",
@@ -139,7 +137,6 @@ ignore = [
     # Security (intentional patterns in GNSS/scientific computing)
     "S101",   # Assert statements (invariant checking)
     "S105",   # Hardcoded password string
-    "S301",   # Pickle usage (session save/restore)
     "S108",   # Hardcoded temp file paths
     "S110",   # Try-except-pass
     "S307",   # Suspicious eval usage

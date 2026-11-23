@@ -3,8 +3,6 @@
 import shlex
 import subprocess
 import sys
-from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 
@@ -54,37 +52,6 @@ def test_timeout_is_bounded_and_retries_reopen_input(tmp_path, monkeypatch):
         RunCommand(["unused"], 0.01, cwd=tmp_path, cat_file="input").run_shell()
     assert len(inputs) == 3
     assert all(stream.closed for stream in inputs)
-
-
-def test_failed_cluster_submission_does_not_wait():
-    import threading
-
-    import dispy
-
-    from geode.pyJobServer import JobServer
-
-    server = JobServer.__new__(JobServer)
-    server.run_parallel = True
-    server.close = False
-    server._node_init_lock = threading.Lock()
-    server.cluster = SimpleNamespace(
-        send_file=Mock(), submit_node=Mock(return_value=None)
-    )
-    server.check_gamit_tables = None
-    server.check_archive = True
-    server.check_executables = False
-    server.check_atx = True
-    server.software_sync = ()
-    server.result = []
-    server.nodes = []
-    node = SimpleNamespace(name="test", avail_cpus=1)
-    server.check_cluster(dispy.DispyNode.Initialized, node, None)
-    assert server.nodes == []
-    assert server.result == []
-
-    server.cluster.submit_node.assert_called_once_with(
-        node, None, True, False, True, ()
-    )
 
 
 @pytest.mark.parametrize(

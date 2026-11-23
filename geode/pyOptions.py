@@ -24,10 +24,6 @@ class ReadOptions:
             "repository": None,
             "format_scripts_path": "/tmp",
             "parallel": False,
-            "cluster_delay": 90,
-            "cups": None,
-            "node_list": None,
-            "ip_address": None,
             "brdc": None,
             "ionex": None,
             "sp3_ac": ["IGS", "JPL"],
@@ -146,4 +142,3 @@ class ReadOptions:
                 self.sp3types.append(ac[0:2].lower() + ll + "{WWWWD}")
 
         self.run_parallel = self.options["parallel"] == "True"
-        self.cluster_delay = int(self.options["cluster_delay"])
