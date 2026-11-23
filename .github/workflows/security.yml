@@ -75,4 +75,4 @@ jobs:
           node-version: '22'
       - name: Audit the production lockfile
         working-directory: web/frontend
-        run: npm audit --package-lock-only --omit=dev --audit-level=critical
+        run: npm audit --package-lock-only --omit=dev --audit-level=high

@@ -104,4 +104,4 @@ its navigation and validate links with the strict build. There is no separate
 Sphinx build. CI checks Linux on each push to `dev`. Lockfile and manifest changes also run an
 Apple Silicon install and PostgreSQL startup test. The Docker workflow scans the
 same images used for its fresh-install smoke test. The security workflow reports
-frontend production-lock advisories and fails on critical findings.
+frontend production-lock advisories and fails on high or critical findings.
