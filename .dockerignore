@@ -2,6 +2,7 @@
 .pixi
 .venv
 .env
+gfzrnx.env
 .env.*
 **/__pycache__
 **/*.py[cod]

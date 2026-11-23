@@ -70,9 +70,14 @@ tests do not require these programs.
 | Tool | Source |
 | --- | --- |
 | GAMIT/GLOBK | [MIT](http://www-gpsg.mit.edu/gg/) |
-| GFZRNX | [GFZ Potsdam](https://gnss.gfz-potsdam.de/services/gfzrnx) |
+| GFZRNX | [GFZ Potsdam](https://gnss.gfz.de/services/gfzrnx) |
 | RNX2CRX / CRX2RNX | [GSI Japan](https://terras.gsi.go.jp/ja/crx2rnx.html) |
 | GPSPACE | [GitHub](https://github.com/demiangomez/GPSPACE) |
+
+On x86-64 Linux, sign in to GFZ to download the Linux binary. Make it
+executable and put it on the processing user's `PATH` under the name
+`gfzrnx_lx`. Run `pixi run --locked gfzrnx_lx -h` to check its version.
+For Hatanaka-compressed observations, also put `crx2rnx` on that user's `PATH`.
 
 Historical institutional installers in `scripts/legacy/` are not supported setup
 paths. For repository development, use the
