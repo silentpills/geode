@@ -37,9 +37,12 @@ mkdir -p var/media-restore-check
 tar -C var/media-restore-check -xzf backups/media.tar.gz
 ```
 
-Use a different new database name for another rehearsal. The API and migration
-tests exercise this `pg_dump`/`pg_restore` round trip on an isolated PostgreSQL
-cluster. For an external server, use its equivalent client tools and credentials.
+Use a different new database name for another rehearsal. The automated API
+suite restores into an empty database on the same temporary PostgreSQL cluster,
+applies the grants, and checks migrations, login, station identity and private
+schema access as the restricted web role. A major-version rehearsal requires
+separate old and new servers and the matching media backup. For an external
+server, use its equivalent client tools and credentials.
 Bring up a restored processing installation with an empty, isolated compute
 queue. Reconcile queued or running receipts with the restored files before
 submitting work. Retain the original broker volume for investigation.
@@ -97,6 +100,13 @@ are outside that audit; the Docker workflow also reports image vulnerabilities
 with Trivy. Frontend security advisories require reviewing the npm dependency
 tree; do not apply `npm audit fix --force` without checking compatibility.
 
+Two current application behaviors matter when choosing data sources. The
+SFTP downloader uses password authentication without verifying the server's
+host key. Use an authenticated HTTPS source for transfers that require server
+identity verification. The web interface renders stored rich-text comments as
+HTML, so restrict the ability to write or import those comments to trusted
+users.
+
 ## Interrupted scientific processing
 
 Use `pixi run --locked compute:status JOB_UUID` before resubmitting a job.
@@ -105,7 +115,14 @@ Check the process, station/day files and database records together.
 
 For GAMIT, normal targeted rebuilds use a sibling `.<session>-attempt-*`
 directory. A failed or dry attempt can be inspected there while the previous
-published subnet remains available. If an old subnet directory has no matching
+published subnet remains available. Each constellation requested in the
+campaign's `[gamit]` section needs at least two observing stations and a
+successful solution. Set `systems = G` for a GPS-only campaign. GeoDE checks
+the GLX and SINEX products before publishing a replacement. A daily GLOBK
+combination must include the expected subnets, and each subnet must supply
+usable zenith-delay observations before GeoDE replaces the daily delay rows.
+
+If an old subnet directory has no matching
 statistics, archive that subnet directory separately before retrying. If
 statistics exist without the corresponding files, or a `.previous` tree or
 `.geode-publish-pending` marker remains, reconcile the database and the files

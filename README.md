@@ -11,7 +11,7 @@ Django API, React web interface, and a shared PostgreSQL database.
 
 Develop and deploy from `dev` in [silentpills/geode](https://github.com/silentpills/geode).
 `main` is an upstream mirror; selected upstream changes and retained scientific
-defaults are documented in the [integration record](docs/development/upstream-integration.md).
+defaults are documented in the [integration record](UPSTREAM.md).
 The backend image builds the processing library from the same checkout. This
 fork has no PyPI publication or release automation.
 

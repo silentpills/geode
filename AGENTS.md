@@ -16,7 +16,7 @@ Delegate independent work to subagents when it improves speed or quality.
 - `web/frontend/`: React/TypeScript application.
 - `docs/`: canonical setup, usage, reference, and development guides, built by
   MkDocs. Start with [development](docs/development/contributing.md) and the
-  [upstream integration record](docs/development/upstream-integration.md).
+  [upstream integration record](UPSTREAM.md).
 
 Processing uses the serial runner or the Celery compute queue. See
 [CLI setup](docs/installation/cli-tools.md) for worker setup and recovery.
@@ -67,6 +67,7 @@ state when these were not exercised.
   Use the [operations guide](docs/development/operations.md) for database/media
   backups and migrations of an existing installation.
 
-Keep current instructions in these entry points and the relevant `docs/` page.
+Update the relevant manual page with each change to user or operator behavior.
+Keep historical upstream decisions in `UPSTREAM.md` outside the manual.
 Use Git history for superseded setup guides. Make focused Conventional Commits
 and report the checks performed and any remaining limitations.

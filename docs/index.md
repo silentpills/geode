@@ -37,9 +37,7 @@ pixi shell
 This fork develops and deploys from `dev`; `main` mirrors upstream. See the
 [installation guide](installation/index.md) for native and Docker setup,
 [processing workflow](usage/processing-workflow.md) for data handling, and
-[development workflow](development/contributing.md) for checks. The
-[upstream integration record](development/upstream-integration.md) explains
-retained scientific defaults and selected upstream changes.
+[development workflow](development/contributing.md) for checks.
 
 ## Components
 

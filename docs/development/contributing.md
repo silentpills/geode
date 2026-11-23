@@ -18,10 +18,13 @@ Use the Pixi version pinned in `mise.toml`. Pixi owns the environments under `.p
 do not create another uv/venv environment. `default` includes processing and dev
 tools; `web` adds Django tests; `runtime` contains the production backend without
 dev tools; `reports`, `docs`, `frontend`, and `audit` cover their named tasks.
-The dedicated `postgres` environment contains the database server, client,
-and backup tools. It has its own solve so its native libraries can differ from
-those required by the geospatial packages. Apple Silicon installs require
-macOS 13.3 or later for the PostgreSQL 19 binaries.
+The single committed `pixi.lock` records packages for Linux x86-64 and Apple
+Silicon. The dedicated `postgres` environment supplies PostgreSQL 19 executables
+such as `initdb`, `pg_ctl`, and `pg_dump`. Pixi resolves their native libraries
+separately from GDAL and the other processing libraries. GeoDE connects to its
+configured database through psycopg in the application environment. Installing
+the tools does not start a database service. Apple Silicon installs require
+macOS 13.3 or later for these binaries.
 
 ## Verification
 
@@ -91,10 +94,10 @@ See [operations](operations.md) for deployment and restoration procedures.
 
 Maintain setup in `docs/installation/`, user workflows in `docs/usage/`, and
 configuration details in `docs/reference/`. This page owns development commands;
-the README and root `AGENTS.md` provide entry points. Keep the dated
-[upstream integration record](upstream-integration.md) for the rationale behind
-fork decisions. Superseded root setup guides and the old all-in-one user manual
-are available in Git history.
+the README and root `AGENTS.md` provide entry points. Update the relevant guide
+in the same change as the behavior it describes. Record upstream port decisions
+in `UPSTREAM.md` at the repository root. Use Git history for superseded guides
+and completed or abandoned proposals.
 
 MkDocs uses `mkdocs.yml` and the `docs` environment. Add new maintained pages to
 its navigation and validate links with the strict build. There is no separate

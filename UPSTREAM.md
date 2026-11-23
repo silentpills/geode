@@ -35,10 +35,10 @@ list the original upstream commits as absent even where their code was ported.
 - Antenna/radome identity is implemented with a separate combination catalog,
   preserving the model table, API IDs, and height conversions. CLI imports,
   station editing, and the web API enforce the pair. See the
-  [antenna catalog guide](../usage/antenna-catalog.md).
+  [antenna catalog guide](docs/usage/antenna-catalog.md).
 - FixPlate saves bounded reference-frame provenance with atomic corrected
   stacks, per-epoch source identities, and a minimal GAMIT project identifier
-  catalog. See [saved reference frames](../usage/reference-frames.md).
+  catalog. See [saved reference frames](docs/usage/reference-frames.md).
 - Database calibration-value import and selection, full GAMIT project
   configuration management, and LLM-assisted metadata planning remain deferred.
   The reporting tools do not require those features.
@@ -60,7 +60,7 @@ The tests include synthetic ETM fitting, subprocess behavior, station-info
 round trips, PPP residual parsing, an isolated PostgreSQL schema/migration test,
 HTML escaping, PDF/KMZ export, and offline campaign-planning checks. Database
 tests create and shut down a temporary server using a local Unix socket.
-The current [development workflow](contributing.md) describes the Pixi environments.
+The current [development workflow](docs/development/contributing.md) describes the Pixi environments.
 
 The existing typecheck job remains informational and still reports issues; lint,
 formatting, and runtime tests are separate checks. CLI help smoke tests also
@@ -84,7 +84,7 @@ database/migration state. CI now includes the complete historical Django suite,
 frontend and documentation builds, and a fresh Docker deployment smoke test.
 The repaired Python audit found vulnerable dependencies that were updated;
 public release and package publication automation has been removed from `dev`.
-See [operations](operations.md) for backup/restore and update procedures.
+See [operations](docs/development/operations.md) for backup/restore and update procedures.
 
 ## November 2026: correctness and robust-fit memory
 

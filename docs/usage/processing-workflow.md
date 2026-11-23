@@ -95,6 +95,11 @@ reports the processing error and tries the next configured download source,
 if available. The temporary directory and downloaded input are removed after
 the processing attempt, including on failure.
 
+If GeoDE cannot register or publish a conversion job, the downloader stops
+and reports the file and job ID. Check its receipt with
+`pixi run --locked compute:status JOB_UUID` before resubmitting a conversion
+whose publication was interrupted.
+
 ## Retry, rejection, and evidence
 
 Inspect the command's reported error and accompanying logs before retrying. The
