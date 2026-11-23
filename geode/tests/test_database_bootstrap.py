@@ -159,6 +159,9 @@ def test_admin_readiness_and_backup(postgres_connection, postgres_bin, tmp_path)
     )
     manage(cnn, "shell", "-c", probe.format(503))
     manage(cnn, "migrate", "--noinput")
+    cnn.execute("""INSERT INTO networks ("NetworkCode") VALUES ('tst')""")
+    cnn.execute("""INSERT INTO stations ("NetworkCode", "StationCode", api_id)
+                   VALUES ('tst', 'keep', 9012)""")
     archive = tmp_path / "backup.dump"
     connection_args = [
         "-h",
@@ -181,18 +184,58 @@ def test_admin_readiness_and_backup(postgres_connection, postgres_bin, tmp_path)
         check=True,
         capture_output=True,
     )
-    cnn.execute("CREATE DATABASE restore_check")
+    cnn.execute("CREATE ROLE restore_owner LOGIN")
+    cnn.execute("CREATE ROLE restore_web LOGIN")
+    cnn.execute("CREATE DATABASE restore_check OWNER restore_owner")
+    restore_args = [
+        "-h",
+        cnn.info.host,
+        "-p",
+        str(cnn.info.port),
+        "-U",
+        "restore_owner",
+    ]
     subprocess.run(
         [
             postgres_bin / "pg_restore",
-            *connection_args,
+            *restore_args,
             "-d",
             "restore_check",
             "--exit-on-error",
             "--no-owner",
+            "--no-privileges",
             str(archive),
         ],
         check=True,
         capture_output=True,
     )
-    manage(cnn, "migrate", "--check", env={"POSTGRES_DB": "restore_check"})
+    subprocess.run(
+        [
+            postgres_bin / "psql",
+            *restore_args,
+            "-d",
+            "restore_check",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-f",
+            ROOT / "database/grant-app-access.sql",
+        ],
+        env={**os.environ, "GEODE_OWNER": "restore_owner", "GEODE_APP": "restore_web"},
+        check=True,
+        capture_output=True,
+    )
+    restored = {"POSTGRES_DB": "restore_check", "POSTGRES_USER": "restore_web"}
+    manage(cnn, "migrate", "--check", env=restored)
+    manage(
+        cnn,
+        "shell",
+        "-c",
+        "from api.models import Stations; from django.test import Client; "
+        "from django.db import connection; "
+        "assert Stations.objects.get(station_code='keep').pk == 9012; "
+        "assert Client().login(username='operator', password='isolated-test-operator-92!'); "
+        "c = connection.cursor(); "
+        "c.execute(\"SELECT has_schema_privilege(current_user, 'geode_compute', 'USAGE')\"); "
+        "assert c.fetchone() == (False,)",
+        env=restored,
+    )
