@@ -154,7 +154,8 @@ def test_admin_readiness_and_backup(postgres_connection, postgres_bin, tmp_path)
     assert "doctor-test-password" not in checked.stdout + checked.stderr
 
     cnn.execute(
-        "DELETE FROM django_migrations WHERE app='api' AND name='0038_reference_frames'"
+        "DELETE FROM django_migrations WHERE id = ("
+        "SELECT id FROM django_migrations WHERE app='api' ORDER BY id DESC LIMIT 1)"
     )
     manage(cnn, "shell", "-c", probe.format(503))
     manage(cnn, "migrate", "--noinput")

@@ -42,15 +42,12 @@ def cast_array_to_float(recordset):
 # class to match the pygreSQl structure using psycopg
 class query_obj(object):
     def __init__(self, cursor):
-        self.rows = []
-        # to maintain backwards compatibility
-        try:
-            self.rows = cast_array_to_float(cursor.fetchall())
-        except psycopg.ProgrammingError as e:
-            if "no results to fetch" in str(e):
-                pass
-            else:
-                raise e
+        # DDL and writes without RETURNING have no result set in psycopg.
+        self.rows = (
+            cast_array_to_float(cursor.fetchall())
+            if cursor.description is not None
+            else []
+        )
 
     def dictresult(self):
         return self.rows
@@ -307,6 +304,16 @@ def run_db_migrations(cnn: "Cnn"):
         with cnn.cnn.transaction():
             cnn.cursor.execute(
                 files("geode").joinpath("sql/reference_frames_v1.sql").read_text()
+            )
+
+    if not cnn.query_float(
+        "SELECT to_regclass('public.geode_compute_jobs') IS NOT NULL "
+        "AND to_regclass('public.geode_gamit_runs') IS NOT NULL AS ready",
+        as_dict=True,
+    )[0]["ready"]:
+        with cnn.cnn.transaction():
+            cnn.cursor.execute(
+                files("geode").joinpath("sql/compute_jobs_v1.sql").read_text()
             )
 
     ##################################################################
