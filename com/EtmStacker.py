@@ -30,7 +30,6 @@ import argparse
 import cmd
 import logging
 import os.path
-import pickle
 import readline
 import time
 from datetime import datetime
@@ -50,6 +49,7 @@ from geode.etm.core.etm_stacker_vce import EtmStackerVCEEnhanced
 from geode.etm.core.logging_config import setup_etm_logging
 from geode.etm.core.s_score import Earthquake
 from geode.etm.core.type_declarations import JumpType
+from geode.etm.stacker.session import SessionError, load_session, save_session
 from geode.pyDate import Date
 from geode.Utils import (
     add_version_argument,
@@ -73,16 +73,18 @@ class EtmStackerShell(cmd.Cmd):
     def __init__(self, etm_stacker: EtmStacker, cnn: Cnn):
         super().__init__()
         self.etm_stacker = etm_stacker
-        self.cnn = cnn
+        self._cnn = cnn
         self.history_file = "etm_stacker_history.log"
         self.history = []
         self.session_start = datetime.now()
 
-        # Restore command history from pickled EtmStacker
+        # Restore command history from the saved session
         self._restore_history()
 
         self.velocities = None
         self.postseismic = None
+        if etm_stacker.solved:
+            self.velocities, self.postseismic = etm_stacker._extract_results()
 
         # Write session header
         with open(self.history_file, "a") as f:
@@ -90,6 +92,13 @@ class EtmStackerShell(cmd.Cmd):
             f.write(f"Session: {self.session_start.strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"CWD: {os.getcwd()}\n")
             f.write(f"{'=' * 70}\n")
+
+    @property
+    def cnn(self):
+        """Open the processing database only for commands that query it."""
+        if self._cnn is None:
+            self._cnn = Cnn("gnss_data.cfg", write_cfg_file=True)
+        return self._cnn
 
     def _restore_history(self):
         """Restore readline history from EtmStacker instance"""
@@ -158,18 +167,29 @@ class EtmStackerShell(cmd.Cmd):
             # save as, use new filename
             arg = "etm_stacker_session_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        self.etm_stacker.filename = arg
-
-        with open(f"{arg}.pkl", "wb") as f:
-            pickle.dump(self.etm_stacker, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-        print(f"Saved to {arg}")
+        try:
+            path = save_session(self.etm_stacker, arg)
+        except (OSError, SessionError) as exc:
+            print(f"Unable to save session: {exc}")
+            return
+        self.etm_stacker.filename = str(path.with_suffix(""))
+        print(f"Saved to {path}")
 
     def do_load(self, arg):
-        """
-        Load previously saved session
-        """
-        pass
+        """Open a portable .etms session. Syntax: load filename"""
+        if not arg:
+            print("Usage: load filename")
+            return
+        try:
+            loaded = load_session(arg)
+        except (OSError, SessionError) as exc:
+            print(f"Unable to load session: {exc}")
+            return
+        self.etm_stacker = loaded
+        self._restore_history()
+        self.velocities = self.postseismic = None
+        if loaded.solved:
+            self.velocities, self.postseismic = loaded._extract_results()
 
     def do_quit(self, arg):
         """Exit the shell"""
@@ -1020,7 +1040,7 @@ def main():
         type=str,
         default=None,
         metavar="filename",
-        help="Load ETM stacker session from pickle file",
+        help="Open a portable ETM stacker session (.etms)",
     )
 
     parser.add_argument(
@@ -1075,18 +1095,13 @@ def main():
 
     args = parser.parse_args()
 
-    cnn = Cnn("gnss_data.cfg", write_cfg_file=True)
+    cnn = None
 
     setup_etm_logging(level=VERBOSITY_MAP[args.etm_verbosity])
 
-    if args.stnlist:
-        stnlist = process_stnlist(cnn, args.stnlist)
-    else:
-        stnlist = []
-
-    etm_stacker = None
-    # user loading from a previous session pickle
     if not args.load_from_file:
+        cnn = Cnn("gnss_data.cfg", write_cfg_file=True)
+        stnlist = process_stnlist(cnn, args.stnlist) if args.stnlist else []
         config = EtmStackerConfig(
             earthquake_magnitude_limit=args.s_score_mag_limit,
             relaxation=np.array(args.default_relax),
@@ -1121,18 +1136,13 @@ def main():
 
         datestr = datetime.now().strftime("%Y%m%d_%H%M%S")
         etm_stacker.filename = f"etm_stacker_session_{datestr}"
-        # with open(f'etm_stacker_session_{datestr}.pkl', 'wb') as f:
-        #    pickle.dump(etm_stacker, f, protocol=pickle.HIGHEST_PROTOCOL)
-
         etm_stacker.solve()
     else:
         print(f" -- Loading saved session {args.load_from_file}")
-        with open(args.load_from_file, "rb") as f:
-            etm_stacker = pickle.load(f)
-
-        etm_stacker.filename = os.path.basename(args.load_from_file).removesuffix(
-            ".pkl"
-        )
+        try:
+            etm_stacker = load_session(args.load_from_file)
+        except (OSError, SessionError) as exc:
+            parser.error(str(exc))
 
     if etm_stacker.solved:
         print(" -- System shows up as solved")

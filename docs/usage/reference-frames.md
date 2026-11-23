@@ -82,3 +82,32 @@ describes creation or the last successful save; subsequent source changes need
 review and rebuilding. PPP source deletion is restricted while corrected rows
 refer to it. This feature adds persistence and models; it does not add a web
 frame-management interface.
+
+## Portable ETM stacker sessions
+
+`EtmStacker` can save a network adjustment for a later shell session or another
+machine running GeoDE. In its interactive shell, type `save regional` to write
+`regional.etms`. Type `save` to update the current file or `save new` to use a
+timestamped name. A failed save preserves the previous file.
+
+On another machine, use the project's Pixi environment to reopen the file:
+
+```bash
+pixi run --locked python -m com.EtmStacker --load_from_file regional.etms
+```
+
+Inside an existing shell, `load regional.etms` replaces the active session.
+Save any edits you want to keep first. Opening a session, inspecting a fitted
+solution, and solving its stored normal equations work offline. Commands that
+query new stations or earthquakes still require the processing database.
+
+A version 1 `.etms` file is a ZIP archive. Its `session.json` records the
+stations, source metadata, earthquake identities, constraints, component order,
+units, command history, and shared references. Typed NumPy arrays preserve
+observations, weights, solutions, covariance and interpolation fields at their
+original precision. Station fits use north/east/up order and the stack uses
+east/north/up. Displacements are in metres, velocities in metres/year and
+relaxation times in years.
+
+The CLI rejects legacy `.pkl` sessions. To recreate one, build the stack from
+the original stations or station ETM JSON inputs and save it as `.etms`.

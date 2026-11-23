@@ -53,7 +53,7 @@ class ConstraintRegistry:
                 # Reset equations and SW-Okada coefficient cache so that any change
                 # to regularisation parameters takes effect on every solve() call,
                 # including when the constraint object is reused after loading from
-                # a pickle file or called a second time in the interactive shell.
+                # a session file or called a second time in the interactive shell.
                 constraint.equations = []
                 if hasattr(constraint, "_constraint_coefficients"):
                     constraint._constraint_coefficients = {}

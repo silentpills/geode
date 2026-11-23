@@ -12,7 +12,7 @@ from tqdm import tqdm
 from ...dbConnection import Cnn
 from ...pyDate import Date
 from ...pyOkada import Mask
-from ...Utils import print_yellow, stationID
+from ...Utils import load_json, print_yellow, stationID
 from ..core.data_classes import Earthquake
 from ..core.etm_config import EtmConfig
 from ..core.etm_engine import EtmEngine
@@ -79,7 +79,7 @@ class EtmStacker:
 
         # to save the command history applied to the stacker instance
         self.command_history: List[str] = []
-        # to store the name of the current pickle (without extension)
+        # to store the name of the current session (without extension)
         self.filename: str = ""
 
         self.print_config()
@@ -202,7 +202,7 @@ class EtmStacker:
 
         if json_path is not None and os.path.isfile(json_path):
             tqdm.write(f"Loading etm for {network_code}.{station_code} from json file")
-            config = EtmConfig(json_file=json_path)
+            config = EtmConfig(json_file=load_json(json_path))
             etm = EtmEngine(config)
             loaded_from_json = True
         else:
