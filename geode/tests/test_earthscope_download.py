@@ -11,6 +11,7 @@ import pytest
 from earthscope_sdk.auth.error import NoTokensError
 from requests import Request, Response
 from requests.adapters import BaseAdapter
+from requests.auth import HTTPBasicAuth
 
 from com import DownloadSources
 from geode import proto_download
@@ -80,3 +81,47 @@ def test_earthscope_login_failure_stops_before_request(monkeypatch):
             session.prepare_request(Request("GET", "https://data.earthscope.org/data"))
         with pytest.raises(ValueError, match="HTTPS"):
             session.prepare_request(Request("GET", "http://data.earthscope.org/data"))
+
+
+@pytest.mark.parametrize("client", [DownloadSources, proto_download])
+@pytest.mark.parametrize(
+    ("origin", "target", "expected"),
+    [
+        ("example.org", "https://example.org/second", "source"),
+        ("example.org", "https://storage.example/data", None),
+        ("example.org", "http://example.org/second", None),
+        ("example.org", "https://example.org:444/second", None),
+        ("cddis.nasa.gov", "https://urs.earthdata.nasa.gov/login", "source"),
+        ("cddis.nasa.gov", "http://urs.earthdata.nasa.gov/login", None),
+        ("cddis.nasa.gov", "https://urs.earthdata.nasa.gov:444/login", None),
+        ("example.org", "https://urs.earthdata.nasa.gov/login", "netrc"),
+    ],
+)
+def test_basic_auth_redirects(tmp_path, monkeypatch, client, origin, target, expected):
+    credentials = tmp_path / "netrc"
+    credentials.write_text(
+        "machine urs.earthdata.nasa.gov login netrc password fixture\n"
+    )
+    credentials.chmod(0o600)
+    monkeypatch.setenv("NETRC", str(credentials))
+    session = client.ProtocolHTTPS(origin, 443, "source", "fixture").session
+    with session:
+        initial = session.prepare_request(Request("GET", f"https://{origin}/first"))
+        redirected = initial.copy()
+        redirected.prepare_url(target, None)
+        session.rebuild_auth(redirected, SimpleNamespace(request=initial))
+        if expected:
+            expected_header = HTTPBasicAuth(expected, "fixture")(
+                Request("GET", target).prepare()
+            )
+            assert (
+                redirected.headers["Authorization"]
+                == expected_header.headers["Authorization"]
+            )
+        else:
+            assert "Authorization" not in redirected.headers
+        # Even a redirect from the login host to signed storage must drop credentials.
+        storage = redirected.copy()
+        storage.prepare_url("https://other-storage.example/item", None)
+        session.rebuild_auth(storage, SimpleNamespace(request=redirected))
+        assert "Authorization" not in storage.headers

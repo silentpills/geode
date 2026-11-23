@@ -224,6 +224,19 @@ class ProtocolSFTP(IProtocol):
 
 
 _EARTHSCOPE_ARCHIVES = {"data.earthscope.org", "gage-data.earthscope.org"}
+_CDDIS_ARCHIVES = {
+    "cddis.nasa.gov",
+    "cddis.gsfc.nasa.gov",
+    "gdc.cddis.eosdis.nasa.gov",
+}
+_EARTHDATA_LOGIN = "urs.earthdata.nasa.gov"
+
+
+def _https_archive_host(url):
+    destination = urlsplit(url)
+    if destination.scheme == "https" and destination.port in (None, 443):
+        return (destination.hostname or "").rstrip(".")
+    return None
 
 
 class _EarthScopeSession(requests.Session):
@@ -233,12 +246,7 @@ class _EarthScopeSession(requests.Session):
 
     @staticmethod
     def accepts(url):
-        destination = urlsplit(url)
-        return (
-            destination.scheme == "https"
-            and (destination.hostname or "").rstrip(".") in _EARTHSCOPE_ARCHIVES
-            and destination.port in (None, 443)
-        )
+        return _https_archive_host(url) in _EARTHSCOPE_ARCHIVES
 
     def authorize(self, request):
         if not self.accepts(request.url):
@@ -267,19 +275,40 @@ class _EarthScopeSession(requests.Session):
             self.authorize(prepared_request)
 
 
-def archive_http_session(hostname, username, password):
-    if hostname.lower().rstrip(".") in _EARTHSCOPE_ARCHIVES:
-        return _EarthScopeSession()
+class _ArchiveSession(requests.Session):
+    def __init__(self, hostname, username, password):
+        super().__init__()
+        self.archive_host = hostname
+        if username and password:
+            self.auth = (username, password)
 
-    class CustomSession(requests.Session):
-        def rebuild_auth(self, prepared_request, response):
-            # Preserve existing source authentication across NASA Earthdata redirects.
+    def rebuild_auth(self, prepared_request, response):
+        previous = response.request.url
+        target = prepared_request.url
+        if not self.should_strip_auth(previous, target):
             return
 
-    session = CustomSession()
-    if username and password:
-        session.auth = (username, password)
-    return session
+        prepared_request.headers.pop("Authorization", None)
+        if _https_archive_host(target) == _EARTHDATA_LOGIN:
+            # CDDIS source records may already specify Earthdata credentials.
+            # Other archives can use the login host's own .netrc entry.
+            auth = None
+            if (
+                self.archive_host in _CDDIS_ARCHIVES
+                and _https_archive_host(previous) in _CDDIS_ARCHIVES
+            ):
+                auth = self.auth
+            if auth is None and self.trust_env:
+                auth = requests.utils.get_netrc_auth(target)
+            if auth:
+                prepared_request.prepare_auth(auth)
+
+
+def archive_http_session(hostname, username, password):
+    hostname = hostname.lower().rstrip(".")
+    if hostname in _EARTHSCOPE_ARCHIVES:
+        return _EarthScopeSession()
+    return _ArchiveSession(hostname, username, password)
 
 
 class ProtocolHTTP(IProtocol):
