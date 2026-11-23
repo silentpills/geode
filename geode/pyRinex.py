@@ -8,16 +8,30 @@ import datetime
 import json
 import os
 import re
+import shlex
 import struct
+import subprocess
 import uuid
 from shutil import copy, copyfile, move, rmtree
+from zipfile import BadZipFile, ZipFile
 
 from . import Utils, pyDate, pyRinexName, pyRunWithRetry
 from .metadata.station_info import StationInfo
 
 # app
 from .pyEvents import Event
-from .pyRinexName import check_year
+from .pyRinexName import (
+    TYPE_CRINEX,
+    TYPE_CRINEX_BZ2,
+    TYPE_CRINEX_BZIP2,
+    TYPE_CRINEX_LONG_Z,
+    TYPE_CRINEX_ZIP,
+    TYPE_CRINEZ,
+    TYPE_CRINEZ_2,
+    TYPE_RINEX,
+    check_year,
+)
+from .pyRinexName import TYPE_RINEZ as TYPE_RINEZ
 from .Utils import (
     chmod_exec,
     ecef2lla,
@@ -26,12 +40,6 @@ from .Utils import (
     file_write,
     struct_unpack,
 )
-
-TYPE_CRINEZ = 0
-TYPE_RINEX = 1
-TYPE_RINEZ = 2
-TYPE_CRINEX = 3
-TYPE_CRINEZ_2 = 4
 
 
 class pyRinexException(Exception):
@@ -615,30 +623,49 @@ class ReadRinex(RinexRecord):
         chmod_exec(script_path)
 
     def uncompress(self):
-        # determine compression type, if necessary
-        result = os.system('file "%s" | grep -q "Zip"' % self.local_copy)
-        if result == 0:
-            prg1 = 'unzip -p "%s" ' % self.local_copy
+        # Some archives use a compression suffix that differs from the contents.
+        with open(self.local_copy, "rb") as source:
+            prefix = source.read(4)
+        if prefix in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
+            # unzip -p concatenates members. A reader represents one observation file.
+            try:
+                with ZipFile(self.local_copy) as archive:
+                    members = [info for info in archive.infolist() if not info.is_dir()]
+            except BadZipFile as e:
+                raise pyRinexExceptionBadFile(
+                    f"Invalid ZIP archive: {self.origin_file}"
+                ) from e
+            if len(members) != 1:
+                raise pyRinexExceptionBadFile(
+                    f"Expected one file in {self.origin_file}, found {len(members)}"
+                )
+            reader = "unzip -p"
+        elif prefix.startswith(b"BZh"):
+            reader = "bzcat"
+        elif all(byte in b"\t\r\n" or 32 <= byte < 127 for byte in prefix):
+            reader = "cat"
         else:
-            result = os.system('file "%s" | grep -q "ASCII"' % self.local_copy)
-            if result == 0:
-                prg1 = 'cat "%s" ' % self.local_copy
-            else:
-                prg1 = 'zcat "%s" ' % self.local_copy
-
-        # determine the program to pipe into
-        if self.origin_type in (TYPE_CRINEZ, TYPE_CRINEX, TYPE_CRINEZ_2):
-            prg2 = ' crx2rnx > "%s"' % self.rinex_path
-        else:
-            prg2 = ' > "%s"' % self.rinex_path
-
-        # create an uncompression script
-        self.create_script("uncompress.sh", prg1 + "|" + prg2)
-
-        # run crz2rnx with timeout structure
-        cmd = pyRunWithRetry.RunCommand(os.path.join(self.rootdir, "uncompress.sh"), 45)
+            reader = "zcat"
+        command = f"{reader} {shlex.quote(self.local_copy)}"
+        if self.origin_type in (
+            TYPE_CRINEZ,
+            TYPE_CRINEX,
+            TYPE_CRINEZ_2,
+            TYPE_CRINEX_ZIP,
+            TYPE_CRINEX_LONG_Z,
+            TYPE_CRINEX_BZ2,
+            TYPE_CRINEX_BZIP2,
+        ):
+            # RNXCMP documents exit status 2 for a completed decode with warnings.
+            command += ' | { crx2rnx || test "$?" -eq 2; }'
+        command += f" > {shlex.quote(self.rinex_path)}"
+        cmd = pyRunWithRetry.RunCommand(["bash", "-o", "pipefail", "-c", command], 45)
         try:
-            _, err = cmd.run_shell()
+            _, err = cmd.run_shell(check=True)
+        except subprocess.CalledProcessError as e:
+            raise pyRinexExceptionBadFile(
+                f"Could not decompress {self.origin_file}: {e.stderr.strip()}"
+            ) from e
         except pyRunWithRetry.RunCommandWithRetryExeception as e:
             # catch the timeout except and pass it as a pyRinexException
             raise pyRinexException(str(e))
@@ -646,10 +673,11 @@ class ReadRinex(RinexRecord):
         # check the size of the file
         size = os.path.getsize(self.local_copy)
         if os.path.isfile(self.rinex_path):
-            if err and os.path.getsize(self.rinex_path) < size:
+            output_size = os.path.getsize(self.rinex_path)
+            if output_size == 0 or (err and output_size < size):
                 raise pyRinexExceptionBadFile(
                     "Error in ReadRinex.__init__ -- crz2rnx: error and empty file: "
-                    + self.origin_file
+                    + str(self.origin_file)
                     + " -> "
                     + err
                 )
@@ -779,7 +807,7 @@ class ReadRinex(RinexRecord):
 
         copy(origin_file, self.rootdir)
 
-        if self.origin_type in (TYPE_CRINEZ, TYPE_CRINEX, TYPE_RINEZ, TYPE_CRINEZ_2):
+        if self.origin_type != TYPE_RINEX:
             self.uncompress()
 
         # check basic infor in the rinex header to avoid problems with RinSum

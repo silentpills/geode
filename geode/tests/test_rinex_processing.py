@@ -1,12 +1,94 @@
 """Keep external RINEX edits intact through subsequent header rewrites."""
 
+import bz2
 import datetime
+import gzip
+import os
 import shlex
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
 from geode import pyRinex
+
+
+@pytest.mark.parametrize(
+    "filename, compact",
+    [
+        ("test0010.26o.Z", False),
+        ("test0010.26o.gz", False),
+        ("test0010.26o.zip", False),
+        ("test0010.26d.zip", True),
+        ("TEST00USA_R_20260010000_01D_30S_MO.rnx.Z", False),
+        ("TEST00USA_R_20260010000_01D_30S_MO.crx.Z", True),
+        ("TEST00USA_R_20260010000_01D_30S_MO.rnx.bz2", False),
+        ("TEST00USA_R_20260010000_01D_30S_MO.crx.bzip2", True),
+    ],
+)
+def test_compressed_observations_reach_header_reader(
+    tmp_path, monkeypatch, filename, compact
+):
+    monkeypatch.chdir(tmp_path)
+    contents = b"END OF HEADER\nobservation\n"
+    # Stand in only for Hatanaka decoding. Plain RINEX must bypass this step.
+    converter = tmp_path / "crx2rnx"
+    converter.write_text("#!/bin/sh\ntouch converter-called\nsed 's/^compact //g'\n")
+    converter.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    payload = b"compact " + contents if compact else contents
+    source = tmp_path / filename
+    if filename.endswith(".zip"):
+        with ZipFile(source, "w") as archive:
+            archive.writestr(source.stem, payload)
+    elif filename.endswith((".bz2", ".bzip2")):
+        source.write_bytes(bz2.compress(payload))
+    else:
+        source.write_bytes(gzip.compress(payload))
+
+    class HeaderReached(Exception):
+        pass
+
+    def inspect_header(record):
+        assert (tmp_path / "converter-called").exists() == compact
+        assert (
+            record.rinex_name_format.to_rinex_format(record.origin_type, True)
+            == filename
+        )
+        assert Path(record.rinex_path).read_bytes() == contents
+        raise HeaderReached
+
+    monkeypatch.setattr(pyRinex.ReadRinex, "check_header", inspect_header)
+    with pytest.raises(HeaderReached):
+        pyRinex.ReadRinex("tst", "test", str(source))
+
+
+def test_zip_rejects_ambiguous_members(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "test0010.26o.zip"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("test0010.26o", "day one")
+        archive.writestr("test0020.26o", "day two")
+    with pytest.raises(pyRinex.pyRinexExceptionBadFile, match="Expected one file"):
+        pyRinex.ReadRinex("tst", "test", str(source))
+
+
+@pytest.mark.parametrize(
+    "data", [gzip.compress(b""), gzip.compress(b"observation\n" * 100)[:-8]]
+)
+def test_empty_or_truncated_gzip_is_rejected_before_header_processing(
+    tmp_path, monkeypatch, data
+):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "test0010.26o.gz"
+    source.write_bytes(data)
+    monkeypatch.setattr(
+        pyRinex.ReadRinex,
+        "check_header",
+        lambda self: pytest.fail("accepted incomplete input"),
+    )
+    with pytest.raises(pyRinex.pyRinexExceptionBadFile):
+        pyRinex.ReadRinex("tst", "test", str(source))
 
 
 @pytest.fixture

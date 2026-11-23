@@ -19,6 +19,15 @@ TYPE_RINEX = 1
 TYPE_RINEZ = 2
 TYPE_CRINEX = 3
 TYPE_CRINEZ_2 = 4
+TYPE_RINEX_GZIP = 5
+TYPE_RINEX_ZIP = 6
+TYPE_CRINEX_ZIP = 7
+TYPE_RINEX_LONG_Z = 8
+TYPE_CRINEX_LONG_Z = 9
+TYPE_RINEX_BZ2 = 10
+TYPE_CRINEX_BZ2 = 11
+TYPE_RINEX_BZIP2 = 12
+TYPE_CRINEX_BZIP2 = 13
 
 version_2_ext = {
     TYPE_CRINEZ: "d.Z",
@@ -26,13 +35,24 @@ version_2_ext = {
     TYPE_RINEZ: "o.Z",
     TYPE_CRINEX: "d",
     TYPE_CRINEZ_2: "d.gz",
-}  # some newer files come in d.gz
+    TYPE_RINEX_GZIP: "o.gz",
+    TYPE_RINEX_ZIP: "o.zip",
+    TYPE_CRINEX_ZIP: "d.zip",
+}
 
 version_3_ext = {
     TYPE_CRINEZ: "crx.gz",
     TYPE_RINEX: "rnx",
     TYPE_RINEZ: "rnx.gz",
     TYPE_CRINEX: "crx",
+    TYPE_RINEX_ZIP: "rnx.zip",
+    TYPE_CRINEX_ZIP: "crx.zip",
+    TYPE_RINEX_LONG_Z: "rnx.Z",
+    TYPE_CRINEX_LONG_Z: "crx.Z",
+    TYPE_RINEX_BZ2: "rnx.bz2",
+    TYPE_CRINEX_BZ2: "crx.bz2",
+    TYPE_RINEX_BZIP2: "rnx.bzip2",
+    TYPE_CRINEX_BZIP2: "crx.bzip2",
 }
 
 
@@ -221,23 +241,14 @@ class RinexNameFormat:
         else:
             self.version = 3
 
-            # DDG: identify file type from filename
-            sfile = re.findall(
-                r"[A-Z0-9]{9}_[RSU]_[0-9]{11}_[0-9]{2}[MHDYU]_[0-9]{2}[CZSMHDU]_"
-                r"[GREJCISM][OMN]\.(crx|rnx)(.gz|.zip|.bzip2|.bz2)?$",
-                filename,
+            # split_filename validates the station, time and observation fields.
+            suffix = self.split_filename(filename)[-1]
+            for file_type, extension in version_3_ext.items():
+                if suffix == extension:
+                    return file_type
+            raise RinexNameException(
+                "Could not determine the rinex type (malformed filename): " + filename
             )
-            if not sfile:
-                raise RinexNameException(
-                    "Could not determine the rinex type (malformed filename): "
-                    + filename
-                )
-            elif sfile[0][0] == "rnx":
-                return TYPE_RINEX if sfile[0][1] == "" else TYPE_RINEZ
-            elif sfile[0][0] == "crx":
-                return TYPE_CRINEX if sfile[0][1] == "" else TYPE_CRINEZ
-
-            # @todo must raise RinexNameException here?
 
     def filename_base(self, override_freq=None):
         if self.version < 3:
@@ -282,7 +293,7 @@ class RinexNameFormat:
     def split_filename(self, filename):
         if self.version < 3:
             sfile = re.findall(
-                r"(\w{4})(\d{3})(\w*)\.(\d{2})([doOD](?:.gz|.Z)?)$", filename
+                r"(\w{4})(\d{3})(\w*)\.(\d{2})([doOD](?:\.(?:gz|Z|zip))?)$", filename
             )
 
             if sfile:
@@ -299,7 +310,7 @@ class RinexNameFormat:
         else:
             sfile = re.findall(
                 r"([A-Z0-9]{9})_([RSU])_([0-9]{11})_([0-9]{2}[MHDYU])_([0-9]{2}[CZSMHDU])_"
-                r"([GREJCISM][OMN])\.((?:crx|rnx)(?:.gz|.zip|.bzip2|.bz2)?)$",
+                r"([GREJCISM][OMN])\.((?:crx|rnx)(?:\.(?:gz|Z|zip|bzip2|bz2))?)$",
                 filename,
             )
             if sfile:

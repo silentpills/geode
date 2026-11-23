@@ -33,7 +33,7 @@ class RunCommand:
         self.cwd = cwd or os.getcwd()
         self.cat_file = cat_file
 
-    def run_shell(self):
+    def run_shell(self, *, check=False):
         retry = 0
         while True:
             cat_fh = None
@@ -60,6 +60,7 @@ class RunCommand:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     cwd=self.cwd,
+                    check=check,
                     timeout=self.time_out,
                     encoding="utf-8",
                     errors="ignore",
