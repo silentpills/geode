@@ -39,7 +39,6 @@ from typing import Any, Dict, List, NamedTuple, Optional
 # deps
 import numpy as np
 import paramiko
-import requests
 from tqdm import tqdm
 
 # app
@@ -57,6 +56,7 @@ from geode.metadata.station_info import (
     StationInfoException,
     StationInfoHeightCodeNotFound,
 )
+from geode.proto_download import archive_http_session
 from geode.pyDate import Date
 from geode.pyRinexName import path_replace_tags
 from geode.Utils import (
@@ -1184,32 +1184,7 @@ class ProtocolHTTP(IProtocol):
     def __init__(self, *args, protocol="http", **kargs):
         super(ProtocolHTTP, self).__init__(protocol, *args, **kargs)
 
-        # NASA server is problematic.
-        # It never sends a "401 Unauthorized" response and also needs
-        # to get the Authorization header in intermediate requests
-        # after the 302 redirect. By default the 'requests' library strips the
-        # Authorization header after the redirects,
-        # so we need to create a custom
-        # Session class who preserves it.
-        # See:
-        #   https://cddis.nasa.gov/Data_and_Derived_Products/CDDIS_Archive_Access.html
-        #   https://github.com/psf/requests/issues/2949#issuecomment-288858676
-        class CustomSession(requests.Session):
-            def rebuild_auth(self, prepared_request, response):
-                return
-
-        # activate the following lines to output complete header information
-        # from http.client import HTTPConnection
-        # import logging
-        # HTTPConnection.debuglevel = 1
-        # logging.basicConfig(level=logging.DEBUG)
-        # The requests will use an HTTP persistent connection
-        self.session = CustomSession()
-
-        if self.username and self.password:
-            # HTTP Basic Authorization
-            self.session.auth = (self.username, self.password)
-
+        self.session = archive_http_session(self.fqdn, self.username, self.password)
         self.base_url = protocol + "://%s:%s" % (self.fqdn, self.port)
 
     def connect(self):
@@ -1262,13 +1237,7 @@ class ProtocolHTTP(IProtocol):
             return combined
 
         token = None
-        if "gage" in self.base_url:
-            result = subprocess.run(
-                ["es", "sso", "access", "--token"], stdout=subprocess.PIPE
-            )
-            token = {"Authorization": "Bearer " + result.stdout.decode("utf-8").strip()}
-            # print(result.stdout.decode('utf-8'))
-        elif "csn" in self.base_url:
+        if "csn" in self.base_url:
             token = {
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,"
                 "image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",

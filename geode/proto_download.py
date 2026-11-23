@@ -14,12 +14,12 @@ import ftplib
 import os
 import shutil
 import socket
-import subprocess
 import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
 from typing import NamedTuple, Optional
+from urllib.parse import urlsplit
 
 import paramiko
 import requests
@@ -223,36 +223,72 @@ class ProtocolSFTP(IProtocol):
 # -------
 
 
+_EARTHSCOPE_ARCHIVES = {"data.earthscope.org", "gage-data.earthscope.org"}
+
+
+class _EarthScopeSession(requests.Session):
+    def __init__(self):
+        super().__init__()
+        self.auth = self.authorize
+
+    @staticmethod
+    def accepts(url):
+        destination = urlsplit(url)
+        return (
+            destination.scheme == "https"
+            and (destination.hostname or "").rstrip(".") in _EARTHSCOPE_ARCHIVES
+            and destination.port in (None, 443)
+        )
+
+    def authorize(self, request):
+        if not self.accepts(request.url):
+            raise ValueError("EarthScope archive downloads require HTTPS on port 443")
+        from earthscope_sdk import EarthScopeClient
+        from earthscope_sdk.auth.error import AuthFlowError
+        from earthscope_sdk.config.error import ProfileDoesNotExistError
+
+        try:
+            with EarthScopeClient() as sdk:
+                flow = sdk.ctx.auth_flow
+                flow.refresh_if_necessary()
+                request.headers["Authorization"] = f"Bearer {flow.access_token}"
+        except (AuthFlowError, ProfileDoesNotExistError):
+            raise RuntimeError(
+                "EarthScope authentication failed. Run `es login` as the user "
+                "running DownloadSources and retry."
+            ) from None
+        return request
+
+    def rebuild_auth(self, prepared_request, response):
+        # Archive aliases share credentials. Signed storage URLs use their own authorization.
+        if not self.accepts(prepared_request.url):
+            prepared_request.headers.pop("Authorization", None)
+        elif "Authorization" not in prepared_request.headers:
+            self.authorize(prepared_request)
+
+
+def archive_http_session(hostname, username, password):
+    if hostname.lower().rstrip(".") in _EARTHSCOPE_ARCHIVES:
+        return _EarthScopeSession()
+
+    class CustomSession(requests.Session):
+        def rebuild_auth(self, prepared_request, response):
+            # Preserve existing source authentication across NASA Earthdata redirects.
+            return
+
+    session = CustomSession()
+    if username and password:
+        session.auth = (username, password)
+    return session
+
+
 class ProtocolHTTP(IProtocol):
     DEFAULT_PORT = 80
 
     def __init__(self, *args, protocol="http", **kargs):
         super(ProtocolHTTP, self).__init__(protocol, *args, **kargs)
 
-        # NASA server is problematic. It never sends a "401 Unauthorized" response
-        # and also needs to get the Authorization header in intermediate requests
-        # after the 302 redirect. By default the 'requests' library strips the
-        # Authorization header after the redirects, so we need to create a custom
-        # Session class who preserves it.
-        # See:
-        #   https://cddis.nasa.gov/Data_and_Derived_Products/CDDIS_Archive_Access.html
-        #   https://github.com/psf/requests/issues/2949#issuecomment-288858676
-        class CustomSession(requests.Session):
-            def rebuild_auth(self, prepared_request, response):
-                return
-
-        # activate the following lines to output complete header information
-        # from http.client import HTTPConnection
-        # import logging
-        # HTTPConnection.debuglevel = 1
-        # logging.basicConfig(level=logging.DEBUG)
-        # The requests will use an HTTP persistent connection
-        self.session = CustomSession()
-
-        if self.username and self.password:
-            # HTTP Basic Authorization
-            self.session.auth = (self.username, self.password)
-
+        self.session = archive_http_session(self.fqdn, self.username, self.password)
         self.base_url = protocol + "://%s:%s" % (self.fqdn, self.port)
 
     def connect(self):
@@ -263,22 +299,10 @@ class ProtocolHTTP(IProtocol):
         pass
 
     def download(self, server_path: str, dest_path: str):
-        if "gage" in self.base_url:
-            result = subprocess.run(
-                ["es", "sso", "access", "--token"], stdout=subprocess.PIPE
-            )
-            gage_token = {
-                "Authorization": "Bearer " + result.stdout.decode("utf-8").strip()
-            }
-            # print(result.stdout.decode('utf-8'))
-        else:
-            gage_token = None
-
         with self.session.get(
             self.base_url + server_path,
             stream=True,
             timeout=SERVER_CONNECTION_TIMEOUT,
-            headers=gage_token,
         ) as r:
             if 200 <= r.status_code <= 299:
                 with open(dest_path, "wb") as f:

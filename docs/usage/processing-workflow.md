@@ -54,6 +54,13 @@ Replace station/date examples with the intended dataset. Downloading and archive
 processing write files and database records. `ArchiveService.py` scans the
 configured repository, rather than accepting a station filter.
 
+For EarthScope GNSS downloads, configure an HTTPS source at
+`data.earthscope.org` or its `gage-data.earthscope.org` alias. Run
+`pixi run --locked es login` once as the operating-system user that will run
+the downloader. GeoDE uses the EarthScope SDK to refresh that user's stored
+access token when needed. A missing or expired login is reported by the
+downloader. See the [EarthScope file server notice](https://www.unavco.org/data/gps-gnss/file-server/file-server-transition-notice.html).
+
 ## Custom download converters
 
 Set `format_scripts_path` in the `[archive]` section of `gnss_data.cfg` to the
