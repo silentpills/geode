@@ -1,5 +1,8 @@
 """Exercise both EarthScope download clients without contacting the archive."""
 
+import base64
+import json
+import time
 from contextlib import nullcontext
 from io import BytesIO
 from types import SimpleNamespace
@@ -15,6 +18,36 @@ from requests.auth import HTTPBasicAuth
 
 from com import DownloadSources
 from geode import proto_download
+
+
+def test_installed_sdk_reads_an_isolated_login(tmp_path, monkeypatch):
+    from earthscope_sdk.config import settings
+
+    monkeypatch.setattr(settings, "_LOCAL_APP_DIR", tmp_path)
+    monkeypatch.setenv("ES_PROFILE", "fixture")
+    (tmp_path / "config.toml").write_text("[profile.fixture]\n")
+    profile = tmp_path / "fixture"
+    profile.mkdir()
+    now = int(time.time())
+    claims = dict(
+        sub="fixture",
+        aud="fixture",
+        iss="fixture",
+        client_id="fixture",
+        iat=now,
+        exp=now + 3600,
+    )
+    payload = base64.b64encode(json.dumps(claims).encode()).decode()
+    token = f"fixture.{payload}.fixture"
+    (profile / "tokens.json").write_text(json.dumps({"access_token": token}))
+
+    with proto_download.archive_http_session(
+        "data.earthscope.org", None, None
+    ) as session:
+        request = session.prepare_request(
+            Request("GET", "https://data.earthscope.org/data")
+        )
+        assert request.headers["Authorization"] == "Bearer " + token
 
 
 @pytest.mark.parametrize("client", [DownloadSources, proto_download])
