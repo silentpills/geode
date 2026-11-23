@@ -1,66 +1,105 @@
+x-backend: &backend
+  image: ${COMPOSE_PROJECT_NAME:-geode}-backend
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-db-environment: &db-environment
+  POSTGRES_HOST: ${POSTGRES_CONTAINER_HOST:-postgres}
+  POSTGRES_PORT: ${POSTGRES_CONTAINER_PORT:-5432}
+  POSTGRES_DB: ${POSTGRES_DB:-pgamit}
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set}
+  DATABASE_WAIT_SECONDS: ${DATABASE_WAIT_SECONDS:-60}
+  PGSSLMODE:
+  PGSSLROOTCERT:
+  PGSSLCERT:
+  PGSSLKEY:
+  PGCHANNELBINDING:
+  PGOPTIONS:
+  GEODE_AUTO_MIGRATE: "false"
+
 services:
   postgres:
-    container_name: gnss-postgres
-    image: postgres:18.4-alpine
+    image: postgres:19.0-alpine
     profiles: [bundled-db]
+    entrypoint: ["/bin/sh", "/usr/local/bin/geode-start-postgres"]
+    command: ["postgres"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-pgamit}
-      POSTGRES_USER: ${POSTGRES_USER:-pgamit}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-}
+      GEODE_OWNER: ${POSTGRES_USER:-pgamit}
+      GEODE_OWNER_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      GEODE_APP: ${POSTGRES_APP_USER:-}
+      GEODE_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
     volumes:
       - pgdata:/var/lib/postgresql
+      - ./database/start-bundled-postgres.sh:/usr/local/bin/geode-start-postgres:ro
+      - ./database/init-bundled-roles.sql:/docker-entrypoint-initdb.d/10-geode-roles.sql:ro
+      - ./database/grant-app-access.sql:/docker-entrypoint-initdb.d/20-geode-grants.sql:ro
     ports:
       - "127.0.0.1:${POSTGRES_PUBLISHED_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pgamit} -d ${POSTGRES_DB:-pgamit}"]
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$$GEODE_OWNER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 5s
       retries: 5
     restart: always
 
+  migrate:
+    <<: *backend
+    pull_policy: never
+    healthcheck:
+      disable: true
+    environment:
+      <<: *db-environment
+      POSTGRES_USER: ${POSTGRES_USER:-pgamit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    command: ["python", "manage.py", "migrate", "--noinput"]
+
   backend:
-    container_name: gnss-backend
+    <<: *backend
     build:
       context: .
       dockerfile: web/backend/Dockerfile
       args:
         USER_ID_TO_SAVE_FILES: ${USER_ID_TO_SAVE_FILES:-1000}
         GROUP_ID_TO_SAVE_FILES: ${GROUP_ID_TO_SAVE_FILES:-1000}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
-      # PostgreSQL connection (reads from .env; defaults to bundled container)
-      - POSTGRES_HOST=${POSTGRES_CONTAINER_HOST:-postgres}
-      - POSTGRES_PORT=${POSTGRES_CONTAINER_PORT:-5432}
-      - POSTGRES_DB=${POSTGRES_DB:-pgamit}
-      - POSTGRES_USER=${POSTGRES_USER:-pgamit}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-      # Django settings
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY must be set in .env}
-      - DJANGO_DEBUG=${DJANGO_DEBUG:-False}
-      - DJANGO_HTTPS=${DJANGO_HTTPS:-False}
-      # Path to gnss_data.cfg (inside container)
-      - GNSS_CONFIG_FILE=${GNSS_CONFIG_FILE:-gnss_data.cfg}
-      # File upload limits
-      - MAX_SIZE_IMAGE_MB=${MAX_SIZE_IMAGE_MB:-75}
-      - MAX_SIZE_FILE_MB=${MAX_SIZE_FILE_MB:-75}
-      - RINEX_STATUS_DATE_SPAN_SECONDS=${RINEX_STATUS_DATE_SPAN_SECONDS:-1000}
-      - USER_ID_TO_SAVE_FILES=${USER_ID_TO_SAVE_FILES:-1000}
-      - GROUP_ID_TO_SAVE_FILES=${GROUP_ID_TO_SAVE_FILES:-1000}
+      <<: *db-environment
+      POSTGRES_USER: ${POSTGRES_APP_USER:?Set POSTGRES_APP_USER for the web and worker services}
+      POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD for the web and worker services}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-False}
+      DJANGO_HTTPS: ${DJANGO_HTTPS:-False}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      GNSS_CONFIG_FILE: ${GNSS_CONFIG_FILE:-gnss_data.cfg}
+      MAX_SIZE_IMAGE_MB: ${MAX_SIZE_IMAGE_MB:-75}
+      MAX_SIZE_FILE_MB: ${MAX_SIZE_FILE_MB:-75}
+      DATA_UPLOAD_MAX_MEMORY_SIZE: ${DATA_UPLOAD_MAX_MEMORY_SIZE:-209715200}
+      DATA_UPLOAD_MAX_NUMBER_FIELDS: ${DATA_UPLOAD_MAX_NUMBER_FIELDS:-10000}
+      DATA_UPLOAD_MAX_NUMBER_FILES: ${DATA_UPLOAD_MAX_NUMBER_FILES:-1000}
+      RINEX_STATUS_DATE_SPAN_SECONDS: ${RINEX_STATUS_DATE_SPAN_SECONDS:-1000}
+      USER_ID_TO_SAVE_FILES: ${USER_ID_TO_SAVE_FILES:-1000}
+      GROUP_ID_TO_SAVE_FILES: ${GROUP_ID_TO_SAVE_FILES:-1000}
     volumes:
       - ${MEDIA_FOLDER_HOST_PATH:-./var/media}:/app/web/backend/media
     restart: always
-    env_file:
-      - .env
 
   frontend:
-    container_name: gnss-frontend
     build:
       context: ./web/frontend
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
     ports:
-      - "${APP_PORT:-8080}:80"
+      - "${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-8080}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -68,8 +107,3 @@ services:
 
 volumes:
   pgdata:
-
-networks:
-  default:
-    driver: bridge
-    

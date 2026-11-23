@@ -1,36 +1,24 @@
 # Configuration Reference
 
-GeoDE uses two configuration methods:
+Use `.env` for installation settings and `gnss_data.cfg` for GNSS
+processing. Set database credentials once in the environment so the CLI and
+Django use the same database. The [database setup guide](../installation/database-setup.md)
+covers connection addresses, roles and migration credentials.
 
-- **CLI Tools**: Use `gnss_data.cfg` (copy from `gnss_data.cfg.example`)
-- **Web Interface**: Uses `.env` file only (copy from `.env.example`)
+| Component | Configuration |
+|-----------|---------------|
+| Django API and web worker | Read database and application settings from the environment. Compose loads the repository's `.env`. |
+| Processing CLI | Reads database settings from the environment and processing settings from `gnss_data.cfg` in the working directory. |
+| Station reports and KMZ exports | Use database settings from the environment. `MEDIA_FOLDER_HOST_PATH` can supply the media directory. See [reports and campaigns](../usage/reports-and-campaigns.md). |
 
-## Configuration File (gnss_data.cfg)
+## Processing configuration
 
-The CLI configuration file uses INI format with multiple sections. Copy the example to get started:
+Copy the tracked template, then set archive paths, external executables,
+reference frames and worker settings for the intended workload.
 
 ```bash
 cp gnss_data.cfg.example gnss_data.cfg
 ```
-
-### [postgres] Section
-
-Database connection settings.
-
-```ini
-[postgres]
-hostname = your-db-server.example.com
-username = geode
-password = your_secure_password
-database = geode
-```
-
-| Setting | Description | Required |
-|---------|-------------|----------|
-| `hostname` | PostgreSQL server hostname or IP | Yes |
-| `username` | Database username | Yes |
-| `password` | Database password | Yes |
-| `database` | Database name | Yes |
 
 ### [archive] Section
 
@@ -58,7 +46,7 @@ sp3_st = FIN,SNX,RAP
 | `ionex` | IONEX files path (supports variables) | Yes |
 | `brdc` | Broadcast orbits path (supports variables) | Yes |
 | `sp3` | SP3 orbits path (supports variables) | Yes |
-| `node_list` | Comma-separated list of processing nodes | Yes |
+| `node_list` | Comma-separated Dispy node addresses for parallel processing | No |
 | `sp3_ac` | Analysis center precedence | No |
 | `sp3_cs` | Campaign code precedence | No |
 | `sp3_st` | Solution type precedence | No |
@@ -119,19 +107,27 @@ atx = /path/to/resources/atx/igs20_2335_plus.atx
 
 ## Environment Variables
 
-Environment variables (typically set via the `.env` file) override `gnss_data.cfg` settings when both are present. This means you can put database credentials in `.env` once and have both the CLI tools and web interface use them, without duplicating values in `gnss_data.cfg`.
+Copy the repository's `.env.example` to `.env` and fill in deployment-specific
+values. For native runs, exported environment variables take precedence over
+values loaded from `.env`. CLI callers that supply a legacy config file can
+still use its `[postgres]` section as a fallback for unset connection values.
 
-**Precedence (highest wins):** Environment variables (`.env`) > `gnss_data.cfg`
+### Database settings
 
-### Database Settings
+Use `POSTGRES_HOST` and `POSTGRES_PORT` for the native CLI. Compose uses
+`POSTGRES_CONTAINER_HOST` and `POSTGRES_CONTAINER_PORT` for connections from
+inside the backend container. Use the same database name (`POSTGRES_DB`) in
+both.
 
-| Variable | Config Equivalent | Description |
-|----------|-------------------|-------------|
-| `POSTGRES_HOST` | `postgres.hostname` | Database hostname |
-| `POSTGRES_PORT` | `postgres.port` | Database port (default: 5432) |
-| `POSTGRES_DB` | `postgres.database` | Database name |
-| `POSTGRES_USER` | `postgres.username` | Database username |
-| `POSTGRES_PASSWORD` | `postgres.password` | Database password |
+| Bundled database credentials | Used by |
+|------------------------------|---------|
+| `POSTGRES_USER` and `POSTGRES_PASSWORD` | Database credentials read by native CLI and Django processes. Use the owner for migrations and the restricted login for a native web process. |
+| `POSTGRES_APP_USER` and `POSTGRES_APP_PASSWORD` | Restricted runtime login that Compose supplies to the web process and its worker |
+| `POSTGRES_ADMIN_PASSWORD` | Bootstrap password for the bundled PostgreSQL `postgres` administrator |
+
+See the [database setup guide](../installation/database-setup.md) for role
+provisioning and the [web setup guide](../installation/web-interface.md)
+for the bundled and external database options.
 
 ### Django Settings
 
@@ -143,63 +139,16 @@ Environment variables (typically set via the `.env` file) override `gnss_data.cf
 
 ### Docker/Web Settings
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `APP_PORT` | Port for web interface | Yes |
-| `MEDIA_FOLDER_HOST_PATH` | Path for uploaded media | Yes |
-| `USER_ID_TO_SAVE_FILES` | UID for file ownership | Yes |
-| `GROUP_ID_TO_SAVE_FILES` | GID for file ownership | Yes |
-| `VITE_API_URL` | Frontend API URL | Yes |
+| Variable | Description | Compose default |
+|----------|-------------|-----------------|
+| `APP_BIND_HOST` | Host address on which the frontend listens | `127.0.0.1` |
+| `APP_PORT` | Host port for the frontend | `8080` |
+| `MEDIA_FOLDER_HOST_PATH` | Host path for uploaded media | `./var/media` |
+| `USER_ID_TO_SAVE_FILES` | UID owning backend files | `1000` |
+| `GROUP_ID_TO_SAVE_FILES` | GID owning backend files | `1000` |
+| `VITE_API_URL` | API origin compiled into the frontend | `http://localhost:8080` |
 
 ### File Upload Limits
 
 | Variable | Description | Default |
-|----------|-------------|---------|
-| `MAX_SIZE_IMAGE_MB` | Max image upload size (MB) | 75 |
-| `MAX_SIZE_FILE_MB` | Max file upload size (MB) | 75 |
-| `RINEX_STATUS_DATE_SPAN_SECONDS` | RINEX status date span | 1000 |
-
----
-
-## Configuration by Component
-
-| Component | Configuration Source |
-|-----------|---------------------|
-| **CLI Tools** | `gnss_data.cfg`, overridden by environment variables from `.env` |
-| **Web Interface** | `.env` file (environment variables only) |
-
-The web interface does not read `gnss_data.cfg`. Both components connect to the same PostgreSQL database — put shared database credentials in `.env` so they stay in sync.
-
----
-
-## Sample .env File
-
-```bash
-# =============================================================================
-# GeoDE Environment Configuration
-# =============================================================================
-
-# PostgreSQL Database
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=geode
-POSTGRES_USER=geode
-POSTGRES_PASSWORD=your_secure_password_here
-
-# Django Settings
-DJANGO_SECRET_KEY=generate-a-secure-key-here
-DJANGO_DEBUG=False
-DJANGO_HTTPS=False
-
-# Docker/Web UI Settings
-APP_PORT=8080
-MEDIA_FOLDER_HOST_PATH=/path/to/media
-USER_ID_TO_SAVE_FILES=1000
-GROUP_ID_TO_SAVE_FILES=1000
-VITE_API_URL=http://localhost:8080
-
-# File Upload Limits
-MAX_SIZE_IMAGE_MB=75
-MAX_SIZE_FILE_MB=75
-RINEX_STATUS_DATE_SPAN_SECONDS=1000
-```
+|

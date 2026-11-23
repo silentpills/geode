@@ -11,9 +11,10 @@ This fork does not publish packages or create automated releases.
 Pause application writers while taking a matching database/media snapshot:
 
 ```bash
+umask 077
 mkdir -p backups
 docker compose stop frontend backend
-docker compose --profile bundled-db exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > backups/geode.dump
+docker compose --profile bundled-db exec -T postgres sh -c 'pg_dump -U "$GEODE_OWNER" -d "$POSTGRES_DB" -Fc' > backups/geode.dump
 tar -C var/media -czf backups/media.tar.gz .
 docker compose start backend frontend
 ```
@@ -25,8 +26,9 @@ separate storage. Do not commit credentials, dumps, or uploaded files.
 Rehearse restoration into a **new empty database**, leaving the source intact:
 
 ```bash
-docker compose --profile bundled-db exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" geode_restore_check'
-docker compose --profile bundled-db exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d geode_restore_check --exit-on-error --no-owner' < backups/geode.dump
+docker compose --profile bundled-db exec -T postgres sh -c 'createdb -U postgres -O "$GEODE_OWNER" geode_restore_check'
+docker compose --profile bundled-db exec -T postgres sh -c 'pg_restore -U "$GEODE_OWNER" -d geode_restore_check --exit-on-error --no-owner --no-privileges' < backups/geode.dump
+docker compose --profile bundled-db exec -T postgres sh -c 'psql -U "$GEODE_OWNER" -d geode_restore_check -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/20-geode-grants.sql'
 docker compose exec -e POSTGRES_DB=geode_restore_check backend python manage.py migrate --check
 mkdir -p var/media-restore-check
 tar -C var/media-restore-check -xzf backups/media.tar.gz
@@ -41,7 +43,21 @@ metadata before resuming writers.
 
 ## Upgrade procedure
 
-After backing up, update the reviewed `dev` checkout and rebuild:
+For a PostgreSQL major-version change, keep the old instance and volume until
+the new one is validated. Take the dump **using the old installation's settings**.
+For example, earlier Compose releases exported the owner as `POSTGRES_USER`
+inside the database container. Select a new Compose project name and new loopback
+ports for the target, and restore media into a separate directory. Copy and
+update the target's environment file with the bootstrap, owner, and app passwords.
+Start **only** the target `postgres` service first. Restore the dump into its
+empty `POSTGRES_DB` with the owner's login using `pg_restore --exit-on-error
+--no-owner --no-privileges`. Apply `20-geode-grants.sql` to that database as
+in the rehearsal above. Then bring up the complete target project, run
+`manage.py doctor`, and verify a login, station records, and uploaded media
+before using the new instance. Use the same project name and environment file
+throughout with `docker compose -p <target-project> --env-file <target-env>`.
+
+For a same-major update, back up, update the reviewed `dev` checkout and rebuild:
 
 ```bash
 docker compose --profile bundled-db up --build -d --wait
@@ -56,22 +72,18 @@ may not reverse database changes.
 
 ## Dependency and environment maintenance
 
-Use Pixi 0.80.0, as pinned in CI and Docker. The `runtime` and `web` environments
+Use the project-pinned Pixi from `mise.toml`. The `runtime` and `web` environments
 share a solve group, so backend tests and Docker use the same Python and library
 versions. The runtime excludes pytest, Ruff, and other development tools.
 SQLite is constrained to a compatible current library; an old monolithic
 package previously shadowed `libsqlite` and broke Python/pre-commit imports.
 The frontend uses Node 22 with `npm ci` and its committed package lock.
 
-For an intentional Python update, edit `pixi.toml` or run `pixi update`, review
+For an intentional Python update, edit `pixi.toml` or run `pixi update <packages>`, review
 `pixi.lock`, and run the checks in [Contributing](contributing.md). Keep the Pixi
-version in the manifest, Dockerfile, and CI aligned. Do not maintain a second
-backend requirements file. Django 5.2 LTS remains the selected series; the schema
-repair did not require a major framework upgrade. Django REST Framework moves
-to 3.17.2 for the security fixes documented in its
-[release notes](https://www.django-rest-framework.org/community/release-notes/#3172).
-The runtime audit also prompted targeted updates to aiohttp, click,
-pydantic-settings, and soupsieve.
+version in `mise.toml`, the Pixi manifest, Dockerfile, and CI aligned. The
+backend uses Django 5.2 LTS and Django REST Framework 3.18 from the shared
+lockfile.
 
 The Python security workflow audits the runtime's locked PyPI dependencies and
 fails on vulnerabilities or an empty dependency selection. Conda native packages

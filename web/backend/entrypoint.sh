@@ -5,5 +5,7 @@ if [[ -f /app/runtime-hook.sh ]]; then
     source /app/runtime-hook.sh
 fi
 python /app/web/backend/manage.py wait_for_database --timeout "${DATABASE_WAIT_SECONDS:-60}"
-python /app/web/backend/manage.py migrate --noinput
+if [[ "${GEODE_AUTO_MIGRATE:-true}" == "true" ]]; then
+    python /app/web/backend/manage.py migrate --noinput
+fi
 exec "$@"

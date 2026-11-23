@@ -12,10 +12,12 @@ Silicon. From the repository root:
 
 ```bash
 cp .env.example .env
+chmod 600 .env
 mkdir -p var/media
 ```
 
-Edit `.env`. Choose a database password and generate `DJANGO_SECRET_KEY` with
+Edit `.env`. For the bundled database, fill the three database password
+fields with distinct generated secrets. Generate `DJANGO_SECRET_KEY` with
 `python3 -c 'import secrets; print(secrets.token_urlsafe(50))'`. Set the hostnames
 in `DJANGO_ALLOWED_HOSTS`, the public URL in `VITE_API_URL`, and `APP_PORT`.
 Include `127.0.0.1` in allowed hosts for the container readiness probe. Set
@@ -26,15 +28,23 @@ The default media mount is `./var/media`; set `MEDIA_FOLDER_HOST_PATH` if using
 another directory. Processing configuration in `gnss_data.cfg` is needed for CLI
 processing, not for basic web setup.
 
+The frontend binds to `127.0.0.1` by default. Set `APP_BIND_HOST` to the
+specific private interface address when a reverse proxy on another host needs
+access. Restrict that port to the proxy and verify direct access is blocked
+from other clients. The Nginx request limit is 160 MiB, enough for a 75 MiB
+log sheet, a 75 MiB navigation file, and multipart overhead. Each application
+file or photo limit remains at most 75 MiB.
+
 ## Start with bundled PostgreSQL
 
 ```bash
 docker compose --profile bundled-db up --build -d --wait
 ```
 
-The backend waits for PostgreSQL, runs the complete migration chain, and starts
-Gunicorn, Celery, Beat, and a loopback-only Redis instance. A failed migration
-stops startup. The frontend waits until the API readiness probe reports a
+The one-shot `migrate` service waits for PostgreSQL and applies the complete
+migration chain with the schema owner login. After it succeeds, the backend
+starts Gunicorn, Celery, Beat, and a loopback-only Redis instance using the
+restricted runtime database login. The frontend waits until API readiness reports a
 reachable database with no pending migrations.
 
 Create your administrator explicitly:
