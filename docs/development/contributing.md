@@ -101,5 +101,7 @@ and completed or abandoned proposals.
 
 MkDocs uses `mkdocs.yml` and the `docs` environment. Add new maintained pages to
 its navigation and validate links with the strict build. There is no separate
-Sphinx build. The tracked workflows are `test.yml` (checks), `security.yml`
-(secret/dependency scans), and `docker.yml` (container validation).
+Sphinx build. CI checks Linux on each push to `dev`. Lockfile and manifest changes also run an
+Apple Silicon install and PostgreSQL startup test. The Docker workflow scans the
+same images used for its fresh-install smoke test. The security workflow reports
+frontend production-lock advisories and fails on critical findings.

@@ -9,6 +9,10 @@ on:
     # Run weekly on Mondays at 00:00 UTC
     - cron: '0 0 * * 1'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
@@ -50,7 +54,7 @@ jobs:
       - name: Set up Pixi
         uses: prefix-dev/setup-pixi@v0.9.4
         with:
-          pixi-version: "0.84.2"
+          pixi-version: "v0.84.2"
           cache: true
           locked: true
 
@@ -60,3 +64,15 @@ jobs:
           pixi list -e runtime --json > runtime-packages.json
           pixi run -e audit python tools/audit_requirements.py < runtime-packages.json > runtime-requirements.txt
           pixi run -e audit pip-audit --no-deps --disable-pip --desc -r runtime-requirements.txt
+
+  npm-audit:
+    name: Frontend dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit the production lockfile
+        working-directory: web/frontend
+        run: npm audit --package-lock-only --omit=dev --audit-level=critical

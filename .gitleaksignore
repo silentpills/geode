@@ -1,16 +1,3 @@
-# Gitleaks ignore file
-# Use this to ignore false positives
-# Format: SHA:file:line
-# Example: 1234567890abcdef:path/to/file.py:42
-
-# Common false positives patterns
-# Lock files may contain hashes that look like secrets
-*.lock
-pixi.lock
-
-# Documentation examples
-docs/**/*.md
-
-# Configuration templates (not actual secrets)
-.env.example
-gnss_data.cfg.example
+# The scanner matched the Django migration name 0035_antenna_radomes.
+055ab11f7632d4a3869de5c90b872df42ee0cd04:web/backend/api/migrations/0036_antenna_catalog_permissions.py:generic-api-key:24
+055ab11f7632d4a3869de5c90b872df42ee0cd04:geode/tests/test_antenna_api.py:generic-api-key:194

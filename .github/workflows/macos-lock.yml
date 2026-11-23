@@ -1,0 +1,32 @@
+name: Apple Silicon lock
+on:
+  push:
+    branches: [dev]
+    paths: ['pixi.lock', 'pixi.toml', '.github/workflows/macos-lock.yml']
+  pull_request:
+    branches: [dev]
+    paths: ['pixi.lock', 'pixi.toml', '.github/workflows/macos-lock.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          pixi-version: "v0.84.2"
+          environments: web postgres
+          locked: true
+      - name: Verify native architecture, archive tools and database startup
+        run: |
+          test "$(uname -m)" = arm64
+          pixi run --locked -e web es --version
+          pixi run --locked -e web test --basetemp=/tmp/geode-pg-pytest geode/tests/test_database_bootstrap.py::test_incomplete_schema_is_not_replaced

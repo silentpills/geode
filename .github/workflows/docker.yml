@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [dev]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -27,18 +31,13 @@ jobs:
           dockerfile: web/frontend/Dockerfile
 
   build:
-    name: Build Docker Images
+    name: Build, smoke-test and scan images
     runs-on: ubuntu-latest
     needs: hadolint
+    env:
+      COMPOSE_PROJECT_NAME: geode-ci
     steps:
       - uses: actions/checkout@v6
-
-      - name: Build backend image
-        run: docker build -f web/backend/Dockerfile -t gnss-backend .
-
-      - name: Build frontend image
-        run: docker build -t gnss-frontend ./web/frontend
-
 
       - name: Smoke-test fresh deployment and readiness
         run: |
@@ -64,43 +63,29 @@ jobs:
                 OR NOT has_table_privilege('api_user', 'INSERT')
               THEN RAISE EXCEPTION 'Incorrect application database privileges'; END IF;
             END \$\$;"
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: geode-ci-backend
+          format: table
+          severity: HIGH,CRITICAL
+          # Findings remain informational; scanner/setup errors fail the job.
+          exit-code: '0'
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.1
+          image-ref: geode-ci-frontend
+          format: table
+          severity: HIGH,CRITICAL
+          # Findings remain informational; scanner/setup errors fail the job.
+          exit-code: '0'
+
       - name: Show deployment logs
         if: always()
         run: docker compose --profile bundled-db logs --no-color
       - name: Stop smoke-test services
         if: always()
         run: docker compose --profile bundled-db down --volumes
-
-  trivy:
-    name: Container Security Scan
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build backend image
-        run: docker build -f web/backend/Dockerfile -t gnss-backend .
-
-      - name: Scan backend image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.76.1
-          image-ref: gnss-backend
-          format: table
-          severity: HIGH,CRITICAL
-          # Findings remain informational; scanner/setup errors fail the job.
-          exit-code: '0'
-
-      - name: Build frontend image
-        run: docker build -t gnss-frontend ./web/frontend
-
-
-      - name: Scan frontend image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.76.1
-          image-ref: gnss-frontend
-          format: table
-          severity: HIGH,CRITICAL
-          # Findings remain informational; scanner/setup errors fail the job.
-          exit-code: '0'
