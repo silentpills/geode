@@ -42,6 +42,26 @@ class CatalogTestCase(TestCase):
             models.User.objects.create_user(username=name, password=name, role=role)
 
 
+class RichTextTests(TestCase):
+    def test_comments_keep_editor_formatting_on_input_and_historical_output(self):
+        from .serializers import StationMetaSerializer, VisitSerializer
+
+        markup = ('<blockquote><strong>Field note</strong></blockquote>'
+                  '<span class="ql-size-large other" style="color:red">Antenna</span>'
+                  '<img alt="attachment"><a href="relative/photo">Photo</a>')
+        for serializer in (StationMetaSerializer, VisitSerializer):
+            field = serializer().fields['comments']
+            with self.subTest(serializer=serializer.__name__):
+                cleaned = field.run_validation(markup)
+                self.assertEqual(cleaned, field.to_representation(markup))
+                self.assertIn('<blockquote><strong>Field note</strong></blockquote>', cleaned)
+                self.assertIn('<span class="ql-size-large">Antenna</span>', cleaned)
+                self.assertNotIn('<img', cleaned)
+                self.assertNotIn('href=', cleaned)
+                self.assertEqual(field.run_validation(''), '')
+                self.assertEqual(field.run_validation(cleaned), cleaned)
+
+
 class PermissionsTest(CatalogTestCase):
     def test_refresh_issues_access_token_for_protected_api(self):
         protected = reverse("station_list")

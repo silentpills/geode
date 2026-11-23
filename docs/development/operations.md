@@ -100,12 +100,9 @@ are outside that audit; the Docker workflow also reports image vulnerabilities
 with Trivy. Frontend security advisories require reviewing the npm dependency
 tree; do not apply `npm audit fix --force` without checking compatibility.
 
-Two current application behaviors matter when choosing data sources. The
-SFTP downloader uses password authentication without verifying the server's
+The SFTP downloader uses password authentication without verifying the server's
 host key. Use an authenticated HTTPS source for transfers that require server
-identity verification. The web interface renders stored rich-text comments as
-HTML, so restrict the ability to write or import those comments to trusted
-users.
+identity verification.
 
 ## Interrupted scientific processing
 

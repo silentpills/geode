@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 // prettier-ignore
 import {
     Page,
@@ -869,7 +870,7 @@ const Pdf = ({
                             renderers={htmlRenderers}
                             stylesheet={reactPdfStyles}
                         >
-                            {stationMeta?.comments ?? ""}
+                            {sanitizeRichText(stationMeta?.comments)}
                         </Html>
                     </View>
 
@@ -1198,9 +1199,7 @@ const Pdf = ({
                                                     renderers={htmlRenderers}
                                                     stylesheet={reactPdfStyles}
                                                 >
-                                                    {v?.comments !== ""
-                                                        ? v?.comments
-                                                        : "None"}
+                                                    {sanitizeRichText(v?.comments || "None")}
                                                 </Html>
                                             </View>
 

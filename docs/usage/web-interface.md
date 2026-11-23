@@ -42,6 +42,11 @@ Stations with errors display warnings:
 
 View comprehensive information about individual stations.
 
+Station and visit comments support emphasis, lists, code, quotations, text sizes,
+and links to HTTP, HTTPS, or email addresses. GeoDE filters comments on API
+input and output, in the editor, and in web and PDF views. Upload photos and
+other attachments in their dedicated fields.
+
 ### Information Summary
 
 - **Station Code**: Four-letter identifier

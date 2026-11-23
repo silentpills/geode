@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -1449,8 +1450,7 @@ const StationMetadataModal = ({
                                         className="textarea-bordered rounded-md overflow-auto p-4 max-h-48"
                                         dangerouslySetInnerHTML={{
                                             __html:
-                                                formattedData.rinex.comments ??
-                                                "",
+                                                sanitizeRichText(formattedData.rinex.comments),
                                         }}
                                     />
                                 ) : (

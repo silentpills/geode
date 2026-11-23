@@ -141,6 +141,7 @@ drf-standardized-errors = "==0.13.0"
 # Explicit backend runtime imports, shared by Docker and the web test environment.
 gunicorn = ">=23,<24"
 argon2-cffi = ">=23.1"
+nh3 = ">=0.3.8,<0.4"
 
 [feature.frontend.dependencies]
 nodejs = "22.*"

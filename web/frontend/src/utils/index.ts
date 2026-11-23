@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "./richText";
 import { FilterState, GapData, StationData, TokenPayload } from "@types";
 import defaultUrl from "@assets/images/placemark_square.png";
 import L from "leaflet";
@@ -40,7 +41,7 @@ export const findLimits = (coordinates: any) => {
 
 export const classHtml = (s: string) => {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(s ? s : "", "text/html");
+    const doc = parser.parseFromString(sanitizeRichText(s), "text/html");
 
     const emptyStrings = [
         "<p><span class='ql-cursor'>﻿</span>\t</p>",

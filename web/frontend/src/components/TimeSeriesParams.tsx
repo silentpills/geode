@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 import { TimeSeriesConfigModal, ConfirmDeleteModal} from "components"
 import { resetTimeSeriesPeriodicService, resetTimeSeriesJumpsService, resetTimeSeriesPolynomialService
     , postTimeSeriesPeriodicService, postTimeSeriesJumpService, deleteTimeSeriesJumpService, getJumpTypesService
@@ -425,7 +426,7 @@ const TimeSeriesParams = ({stationId, refetch, solution, jumpsData, periodicData
                     {jumpData.action ? jumpData.action : "-"} 
                 </td>
                 <td className="p-3 text-center border border-gray-300" title={jumpData.metadata}>
-                    <div dangerouslySetInnerHTML={{ __html: jumpData.metadata ? jumpData.metadata : "-" }} />
+                    <div dangerouslySetInnerHTML={{ __html: sanitizeRichText(jumpData.metadata || "-") }} />
                 </td>
             </tr>
             ))}

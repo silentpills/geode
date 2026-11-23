@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 import { useEffect, useState } from "react";
 import {
     AddFileModal,
@@ -1185,7 +1186,7 @@ const StationVisitDetailModal = ({
                                                 <div
                                                     className="textarea-bordered rounded-md text-xl bg-neutral-content max-h-32 overflow-auto p-4 h-auto"
                                                     dangerouslySetInnerHTML={{
-                                                        __html: richText ?? "",
+                                                        __html: sanitizeRichText(richText),
                                                     }}
                                                 />
                                             ) : (

@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 import { useEffect, useRef } from "react";
 
 import ReactQuill from "react-quill";
@@ -38,7 +39,7 @@ const QuillText = ({ value, setValue, clase }: QuillTextProps) => {
         <ReactQuill
             ref={quillRef}
             theme="snow"
-            value={value}
+            value={sanitizeRichText(value)}
             onChange={setValue}
             modules={modules}
             className={clase}

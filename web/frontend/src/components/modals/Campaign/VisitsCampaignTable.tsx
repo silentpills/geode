@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 import { StationVisitsData } from "@types";
 import { Link } from "react-router-dom";
 import React, { Fragment } from "react";
@@ -146,8 +147,7 @@ const VisitsCampaignTable = ({
                                                     <div
                                                         dangerouslySetInnerHTML={{
                                                             __html:
-                                                                visit[camp] ??
-                                                                "",
+                                                                sanitizeRichText(visit[camp]),
                                                         }}
                                                     />
                                                 </div>

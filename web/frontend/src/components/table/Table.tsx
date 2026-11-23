@@ -1,3 +1,4 @@
+import { sanitizeRichText } from "@utils/richText";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Spinner } from "@componentsReact";
@@ -340,7 +341,7 @@ const Table = ({
                                                             className="overflow-y-auto overflow-x-auto pl-8 max-h-32"
                                                             dangerouslySetInnerHTML={{
                                                                 __html:
-                                                                    val ?? "",
+                                                                    sanitizeRichText(String(val)),
                                                             }}
                                                         />
                                                     )}

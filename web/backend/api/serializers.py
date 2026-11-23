@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from .rich_text import RichTextField
 from . import models
 import django.contrib.auth.hashers
 from django.contrib.auth import get_user_model
@@ -394,6 +395,7 @@ class StationMetaGapsSerializer(serializers.ModelSerializer):
 
 
 class StationMetaSerializer(serializers.ModelSerializer):
+    comments = RichTextField(required=False, allow_blank=True)
     navigation_actual_file = serializers.SerializerMethodField()
     station_type_name = serializers.SerializerMethodField()
     navigation_file_delete = serializers.BooleanField(write_only=True)
@@ -629,6 +631,7 @@ class CampaignSerializer(serializers.ModelSerializer):
 
 
 class VisitSerializer(serializers.ModelSerializer):
+    comments = RichTextField(required=False, allow_blank=True)
     log_sheet_actual_file = serializers.SerializerMethodField()
     navigation_actual_file = serializers.SerializerMethodField()
     campaign_name = serializers.SerializerMethodField()
