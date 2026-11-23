@@ -4,9 +4,9 @@ The GeoDE web interface provides an interactive way to monitor and manage your G
 
 ## Login
 
-Access the interface at your configured URL and provide your credentials.
-
-![Login Page](https://github.com/user-attachments/assets/dbdb2bfa-0908-41e8-8605-0dde95324648)
+Open the configured URL and enter your GeoDE username and password below the
+GeoDE logo. For the first account on a new installation, follow the
+[administrator setup instructions](../installation/web-interface.md).
 
 ---
 

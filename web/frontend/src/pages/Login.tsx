@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Toast, Modal } from "@componentsReact";
 import { AxiosError } from "axios";
 
-import osupng from "@assets/images/logo-osu-01.png";
+import geodeLogo from "@assets/images/geode-logo.png";
 
 import { ExclamationCircleIcon } from "@heroicons/react/24/outline";
 import { useAuth } from "@hooks";
@@ -154,12 +154,15 @@ const Login = () => {
                 className="flex flex-col w-full max-w-md px-4 py-8 self-center my-auto rounded-lg 
             shadow bg-base-200 sm:px-6 md:px-8 lg:px-10"
             >
-                {/* <div className="self-center mb-6 text-xl font-bold sm:text-2xl ">
-                    Login
-                </div> */}
-                <img src={osupng} alt="parallel_gamit" />
+                <img
+                    src={geodeLogo}
+                    alt="GeoDE"
+                    width={2418}
+                    height={1246}
+                    className="h-auto w-full max-w-64 self-center"
+                />
                 <div className="mt-8">
-                    <form action="#" autoComplete="off" onSubmit={handleLogin}>
+                    <form onSubmit={handleLogin}>
                         <div className="flex flex-col mb-2">
                             <div className="flex relative ">
                                 <span
@@ -196,6 +199,9 @@ const Login = () => {
                                 <input
                                     type="text"
                                     id="username"
+                                    name="username"
+                                    autoComplete="username"
+                                    aria-label="Username"
                                     value={username}
                                     onChange={(e) =>
                                         setUsername(e.target.value)
@@ -227,6 +233,9 @@ const Login = () => {
                                 <input
                                     type="password"
                                     id="password"
+                                    name="password"
+                                    autoComplete="current-password"
+                                    aria-label="Password"
                                     value={password}
                                     onChange={(e) =>
                                         setPassword(e.target.value)
