@@ -63,6 +63,16 @@ Font.register({
     ],
 });
 
+function formatCoordinate(value: number | null | undefined, latitude: boolean) {
+    if (value == null) return "Unavailable";
+    const decimal = Number(value).toFixed(8);
+    return `${decimalToDMS(Number(decimal), latitude)} (${decimal})`;
+}
+
+function formatMetres(value: number | null | undefined) {
+    return value == null ? "Unavailable" : `${value} m`;
+}
+
 const Pdf = ({
     stationInfo,
     monuments,
@@ -426,7 +436,7 @@ const Pdf = ({
                             >
                                 <Text>Country code: </Text>
                                 <Text style={{ fontWeight: "bold" }}>
-                                    {station?.country_code.toUpperCase()}
+                                    {station?.country_code?.toUpperCase() || "Unavailable"}
                                 </Text>
                             </View>
                         </View>
@@ -435,47 +445,33 @@ const Pdf = ({
                                 <Text>Latitude:</Text>
                                 <Text>
                                     {" "}
-                                    {decimalToDMS(
-                                        Number(station?.lat.toFixed(8)),
-                                        true,
-                                    ) +
-                                        " " +
-                                        "(" +
-                                        station?.lat.toFixed(8) +
-                                        ")"}
+                                    {formatCoordinate(station?.lat, true)}
                                 </Text>
                             </Text>
                             <Text>
                                 <Text>Longitude:</Text>
                                 <Text>
                                     {" "}
-                                    {decimalToDMS(
-                                        Number(station?.lon.toFixed(8)),
-                                        false,
-                                    ) +
-                                        " " +
-                                        "(" +
-                                        station?.lon.toFixed(8) +
-                                        ")"}
+                                    {formatCoordinate(station?.lon, false)}
                                 </Text>
                             </Text>
                             <Text>
                                 <Text>Height:</Text>
-                                <Text> {Number(station?.height) + " m"}</Text>
+                                <Text> {formatMetres(station?.height)}</Text>
                             </Text>
                         </View>
                         <View style={{ width: "28%", fontSize: 12 }}>
                             <Text>
                                 <Text>X: </Text>
-                                <Text>{station?.auto_x + " m"}</Text>
+                                <Text>{formatMetres(station?.auto_x)}</Text>
                             </Text>
                             <Text>
                                 <Text>Y: </Text>
-                                <Text>{station?.auto_y + " m"}</Text>
+                                <Text>{formatMetres(station?.auto_y)}</Text>
                             </Text>
                             <Text>
                                 <Text>Z: </Text>
-                                <Text>{station?.auto_z + " m"}</Text>
+                                <Text>{formatMetres(station?.auto_z)}</Text>
                             </Text>
                         </View>
                     </View>
