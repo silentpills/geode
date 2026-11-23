@@ -5,7 +5,9 @@ Author: Demian D. Gomez
 """
 
 import fcntl
+import math
 import os
+import re
 import tempfile
 from pathlib import Path
 from shutil import copyfile, rmtree
@@ -121,25 +123,93 @@ def publish_directory(staged, destination, confirm=None):
         os.close(parent_fd)
 
 
-def completed_session(cnn, path, row_key):
+ZENITH_DELAY = re.compile(
+    r"ATM_ZEN X\s+(\w{4})\s+\S+\s+(\d{4})\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)"
+    r"\s+(?:\d+\s+)?([+-]?\d*\.\d+)\s+[+-]*\s*(\d*\.\d+)\s+([+-]?\d*\.\d+)"
+)
+
+
+def zenith_delays(path):
+    matches = []
+    with file_open(str(path)) as source:
+        for number, line in enumerate(source, 1):
+            if "ATM_ZEN X" not in line or "q-file:" in line:
+                continue
+            match = ZENITH_DELAY.search(line)
+            if match is None:
+                raise ValueError(
+                    f"Invalid atmospheric zenith delay in {path} at line {number}"
+                )
+            matches.append(match)
+    if not matches:
+        raise ValueError(f"No usable atmospheric zenith delays in {path}")
+    return matches
+
+
+def subnet_glx(directory):
+    paths = list(Path(directory).glob("h*.glx"))
+    if len(paths) != 1 or not paths[0].is_file() or not paths[0].stat().st_size:
+        raise ValueError(f"Expected one nonempty subnet GLX in {directory}")
+    return paths[0]
+
+
+def read_solution(directory, org, date):
+    path = Path(directory) / f"{org}{date.wwwwd()}.snx"
+    snx = snxParse.snxFileParser(str(path))
+    snx.parse()
+    if not snx.stationDict:
+        raise ValueError(f"No station estimates in {path}")
+    for station, estimate in snx.stationDict.items():
+        values = (
+            estimate.X,
+            estimate.Y,
+            estimate.Z,
+            estimate.sigX,
+            estimate.sigY,
+            estimate.sigZ,
+            estimate.sigXY,
+            estimate.sigXZ,
+            estimate.sigYZ,
+        )
+        if any(value is None or not math.isfinite(value) for value in values):
+            raise ValueError(
+                f"Incomplete position or covariance for {station} in {path}"
+            )
+    return snx
+
+
+def validate_subnet_products(directory, org, date):
+    subnet_glx(directory)
+    read_solution(directory, org, date)
+    zenith_delays(Path(directory) / f"{org}{date.wwwwd()}.znd")
+
+
+def completed_session(cnn, path, row_key, systems, org, date):
     """A missing completion record never authorizes deletion of an existing tree."""
     destination = Path(path)
     cnn.cursor.execute(
-        'SELECT EXISTS (SELECT 1 FROM gamit_stats WHERE "Year"=%s AND "DOY"=%s '
-        'AND "Project"=%s AND subnet=%s) AS ready',
+        'SELECT system FROM gamit_stats WHERE "Year"=%s AND "DOY"=%s '
+        'AND "Project"=%s AND subnet=%s',
         (row_key["Year"], row_key["DOY"], row_key["Project"], row_key["subnet"]),
     )
-    ready = cnn.cursor.fetchone()["ready"]
+    recorded = {row["system"] for row in cnn.cursor.fetchall()}
     previous = destination.with_name(f".{destination.name}.previous")
     pending = destination / ".geode-publish-pending"
     if (
-        ready
+        recorded
         and destination.is_dir()
         and not previous.exists()
         and not pending.exists()
     ):
+        if recorded != set(systems):
+            return False
+        try:
+            validate_subnet_products(destination / "glbf", org, date)
+        except (OSError, ValueError):
+            # A new attempt can repair incomplete output without modifying the old tree.
+            return False
         return True
-    if ready or destination.exists() or previous.exists():
+    if recorded or destination.exists() or previous.exists():
         raise GamitSessionException(
             f"Incomplete publication or inconsistent completion record for {path}. "
             "Inspect the job receipt, solution, and sibling .previous directory. "
@@ -275,7 +345,17 @@ class GamitSession(object):
             "subnet": 0 if subnet is None else subnet,
         }
 
-        self.ready = completed_session(cnn, self.solution_pwd, row_key) and not rebuild
+        self.ready = (
+            completed_session(
+                cnn,
+                self.solution_pwd,
+                row_key,
+                self.GamitOpts["systems"],
+                self.GamitOpts["org"],
+                date,
+            )
+            and not rebuild
+        )
         self.missing_data = []
         self.subnet_record = {
             **row_key,

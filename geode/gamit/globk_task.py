@@ -4,7 +4,7 @@ Date: Dic-03-2016
 Author: Demian D. Gomez
 """
 
-import glob
+import gzip
 import os
 import shutil
 import subprocess
@@ -12,8 +12,12 @@ import tempfile
 from pathlib import Path
 
 # app
-from geode import snxParse
-from geode.gamit.gamit_session import publish_directory, session_products
+from geode.gamit.gamit_session import (
+    publish_directory,
+    read_solution,
+    session_products,
+    subnet_glx,
+)
 from geode.Utils import chmod_exec, file_open
 
 
@@ -23,6 +27,27 @@ class GlobkException(Exception):
 
     def __str__(self):
         return repr(self.value)
+
+
+def verify_globk_inputs(report, inputs):
+    """GLOBK may exit successfully after rejecting one or more input solutions."""
+    used = set()
+    opener = gzip.open if report.suffix == ".gz" else open
+    with opener(report, "rt", errors="replace") as stream:
+        for line in stream:
+            fields = line.split()
+            if (
+                len(fields) == 7
+                and fields[0].isdigit()
+                and fields[-1] == "USED"
+                and fields[1].lower().endswith(".glx")
+            ):
+                used.add(os.path.normpath(fields[1]))
+    missing = set(map(os.path.normpath, inputs)) - used
+    if missing:
+        raise GlobkException(
+            f"GLOBK did not use all expected inputs: {', '.join(sorted(missing))}"
+        )
 
 
 class Globk(object):
@@ -56,6 +81,7 @@ class Globk(object):
         # link the apr file as the lfile.
         with link_tables:
             contents = """#!/bin/bash
+                set -e
                 # set up links
                 sh_links.tables -frame J2000 -year %s -eop %s -topt none &> sh_links.out;
                 # link the bulletin A
@@ -101,19 +127,22 @@ class Globk(object):
         return result
 
     def _combine(self):
-        for s in self.Sessions:
-            for glx in glob.glob(os.path.join(s["directory"], "h*.glx")):
-                # save the files that have to be copied, the copy process is done on each node
-                h_file = (
-                    "h"
-                    + s["name"]
-                    + self.date.yyyy()
-                    + self.date.ddd()
-                    + "_"
-                    + self.expt
-                    + ".glx"
-                )
-                shutil.copyfile(glx, os.path.join(self.pwd_comb, h_file))
+        inputs = []
+        for session in self.Sessions:
+            glx = subnet_glx(session["directory"])
+            h_file = (
+                f"h{session['name']}{self.date.yyyy()}{self.date.ddd()}_{self.expt}.glx"
+            )
+            target = Path(self.pwd_comb) / h_file
+            if target.exists():
+                raise GlobkException(f"Duplicate subnet input {h_file}")
+            shutil.copyfile(glx, target)
+            inputs.append("../" + h_file)
+        if not inputs:
+            raise GlobkException("No subnet inputs for GLOBK")
+        tables = Path(self.pwd_comb) / "tables"
+        tables.mkdir()
+        (tables / "globk.gdl").write_text("".join(path + "\n" for path in inputs))
 
         self.linktables(self.date.yyyy(), self.eop)
         self.create_combination_script(self.date, self.org)
@@ -133,6 +162,9 @@ class Globk(object):
                 f"GLOBK command exited with status {self.p.returncode}: {self.stderr!r}"
             )
 
+        report = Path(self.pwd_comb) / f"{self.org}{self.date.wwwwd()}.out.gz"
+        verify_globk_inputs(report, inputs)
+
     def create_combination_script(self, date, org):
         # extract the gps week and convert to string
         gpsWeek_str = date.wwww()
@@ -148,20 +180,14 @@ class Globk(object):
         with run_file:
             contents = r"""#!/bin/bash
 
+            set -e
             export INSTITUTE=%s
 
             # data product file names
             OUT_FILE=%s%s%s;
             
-            # mk solutions directory for prt files etc
-            [ ! -d tables ] && mkdir tables
-
             cd tables
             ../link_tables.sh
-
-            # create global directory listing for globk
-            for file in $(find .. -name "*.glx" -print);do echo $file;done | grep    "\/n0\/"  > globk.gdl
-            for file in $(find .. -name "*.glx" -print);do echo $file;done | grep -v "\/n0\/" >> globk.gdl
 
             # create the globk cmd file
             echo " app_ptid all"                                                          > globk.cmd
@@ -194,10 +220,10 @@ class Globk(object):
             echo "-FILE/REFERENCE                               " >> head.snx
 
             # run globk
-            globk 0 ../file.prt ../globk.log globk.gdl globk.cmd 2>&1 > ../globk.out
+            globk 0 ../file.prt ../globk.log globk.gdl globk.cmd > ../globk.out 2>&1
 
             # convert the GLX file into sinex
-            glbtosnx . ./head.snx ../file.GLX ../${OUT_FILE}.snx 2>&1 > ../glbtosnx.out
+            glbtosnx . ./head.snx ../file.GLX ../${OUT_FILE}.snx > ../glbtosnx.out 2>&1
 
             # restore original directory
             cd ..;
@@ -246,24 +272,17 @@ class Globk(object):
         chmod_exec(run_file_path)
 
     def parse_sinex(self):
-        for sinex in os.listdir(self.pwd_comb):
-            if sinex.endswith(".snx"):
-                snx = snxParse.snxFileParser(os.path.join(self.pwd_comb, sinex))
-                snx.parse()
-                self.polyhedron = snx.stationDict
-                self.VarianceFactor = snx.varianceFactor
+        snx = read_solution(self.pwd_comb, self.org, self.date)
+        stations = {}
+        for session in self.Sessions:
+            for alias, network, station in session["stations"]:
+                identity = f"{network}.{station}"
+                previous = stations.setdefault(alias.upper(), identity)
+                if previous != identity:
+                    raise GlobkException(f"Conflicting station identity for {alias}")
 
-        if self.polyhedron:
-            # rename the dict keys to net.stn format (and replace any aliases)
-            for GamitSession in self.Sessions:
-                for alias, network, station in GamitSession["stations"]:
-                    # replace the key
-                    try:
-                        self.polyhedron[f"{network}.{station}"] = self.polyhedron.pop(
-                            alias.upper()
-                        )
-                    except KeyError:
-                        # maybe the station didn't have a solution
-                        pass
-
+        self.polyhedron = {
+            stations[alias]: estimate for alias, estimate in snx.stationDict.items()
+        }
+        self.VarianceFactor = snx.varianceFactor
         return self.polyhedron, self.VarianceFactor

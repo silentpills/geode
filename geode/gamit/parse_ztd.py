@@ -5,7 +5,6 @@ Author: Demian D. Gomez
 """
 
 import os
-import re
 import traceback
 from datetime import datetime
 
@@ -14,8 +13,7 @@ import numpy
 
 # app
 from geode import dbConnection
-from geode.gamit.gamit_session import replace_day, session_products
-from geode.Utils import file_readlines
+from geode.gamit.gamit_session import replace_day, session_products, zenith_delays
 
 
 class ParseZtdTask:
@@ -42,31 +40,28 @@ class ParseZtdTask:
                     GamitSession["directory"], self.org + self.date.wwwwd() + ".znd"
                 )
 
-                if os.path.isfile(znd):
-                    # read the content of the file
-                    output = file_readlines(znd)
-                    v = re.findall(
-                        r"ATM_ZEN X (\w+) .. (\d+)\s*(\d*)\s*(\d*)\s*(\d*)\s*(\d*)\s*\d*\s*([- ]?"
-                        r"\d*.\d+)\s*[+-]*\s*(\d*.\d*)\s*(\d*.\d*)",
-                        "".join(output),
-                        re.MULTILINE,
+                values = zenith_delays(znd)
+                stations = {
+                    name.upper(): [network, station]
+                    for name, network, station in GamitSession["stations"]
+                }
+                for observation in values:
+                    name = observation[1]
+                    identity = stations[name]
+                    if name in alias and alias[name] != identity:
+                        raise ValueError(
+                            f"Conflicting station identity for {name} in {znd}"
+                        )
+                    alias[name] = identity
+                    atmzen.append(
+                        observation.groups()
+                        + (GamitSession["date"].year, GamitSession["date"].doy)
                     )
-                    # add the year doy tuple to the result
-                    atmzen += [
-                        i + (GamitSession["date"].year, GamitSession["date"].doy)
-                        for i in v
-                    ]
 
-                    # create a lookup table for station aliases
-                    for zd in v:
-                        for name, network, station in GamitSession["stations"]:
-                            if name.upper() == zd[0] and zd[0] not in alias:
-                                alias[zd[0]] = [network, station]
-
-            except:
+            except Exception:
                 err.append(
                     " -- Error parsing zenith delays for session %s:\n%s"
-                    % (GamitSession["network"], traceback.format_exc())
+                    % (GamitSession["name"], traceback.format_exc())
                 )
                 return err
 

@@ -608,7 +608,7 @@ def main():
 
         # execute globk on doys that had to be divided into subnets
         if not args.dry_run:
-            execute_globk(cnn, JobServer, GamitConfig, sessions, dates, run_id)
+            execute_globk(JobServer, GamitConfig, sessions, dates, run_id)
 
             # parse the zenith delay outputs
             exec_parse_ztd(
@@ -706,7 +706,7 @@ def exec_parse_ztd(project, dates, Sessions, GamitConfig, JobServer, run_id):
     JobServer.close_cluster()
 
 
-def execute_globk(cnn, JobServer, GamitConfig, sessions, dates, run_id):
+def execute_globk(JobServer, GamitConfig, sessions, dates, run_id):
     project = GamitConfig.NetworkConfig.network_id.lower()
 
     tqdm.write(
@@ -734,50 +734,12 @@ def execute_globk(cnn, JobServer, GamitConfig, sessions, dates, run_id):
             + date.ddd()
         )
 
-        GlobkComb = []
-        Fatal = False
-
-        for GamitSession in sessions:
-            if GamitSession.date == date:
-                # add to combination
-                GlobkComb.append(GamitSession)
-
-                # if os.path.isfile(os.path.join(GamitSession.solution_pwd, 'monitor.log')):
-                #    cmd = 'grep -q \'FATAL\' ' + os.path.join(GamitSession.solution_pwd, 'monitor.log')
-                #    fatal = os.system(cmd)
-                # else:
-                #    fatal = 0
-
-                # check the database to see that the solution was successful
-                rn = cnn.query_float(
-                    'SELECT * from gamit_stats WHERE "Project" = \'%s\' AND "Year" = %i AND '
-                    '"DOY" = %i AND "subnet" = %i'
-                    % (
-                        GamitSession.NetName,
-                        GamitSession.date.year,
-                        GamitSession.date.doy,
-                        GamitSession.subnet if GamitSession.subnet is not None else 0,
-                    )
-                )
-                # if fatal == 0:
-                if not len(rn):
-                    Fatal = True
-                    tqdm.write(
-                        " >> GAMIT FATAL found in monitor of session %s %s (or no monitor.log file). "
-                        "This combined solution will not be added to the database."
-                        % (GamitSession.date.yyyyddd(), GamitSession.DirName)
-                    )
-                    break
-
-        if not Fatal:
-            # folder where the combination (or final solution if single network) should be written to
-            pwd_comb = os.path.join(pwd, project + "/glbf")
-            # globk combination object
-            products = [gamit_session.session_products(s) for s in GlobkComb]
-            options = {k: GamitConfig.gamitopt[k] for k in ("org", "expt", "eop_type")}
-            JobServer.submit(
-                pwd_comb, project, date, products, net_type, options, run_id
-            )
+        products = [
+            gamit_session.session_products(s) for s in sessions if s.date == date
+        ]
+        pwd_comb = os.path.join(pwd, project + "/glbf")
+        options = {k: GamitConfig.gamitopt[k] for k in ("org", "expt", "eop_type")}
+        JobServer.submit(pwd_comb, project, date, products, net_type, options, run_id)
 
     JobServer.wait()
     pbar.close()
@@ -852,24 +814,19 @@ def gamit_callback(job):
                     f"system {result['system']} message from node follows -> \n{result['error']}",
                 )
 
+        if any(not result["success"] for result in results):
+            raise RuntimeError(
+                f"GAMIT failed for {results[0]['session']}. Inspect FATAL.log before retrying."
+            )
     else:
-        tqdm.write(
-            " -- %s Fatal error on node %s message from node follows -> \n%s"
-            % (print_datetime(), job.ip_addr, job.exception)
-        )
+        raise RuntimeError(f"GAMIT failed on {job.ip_addr}: {job.exception}")
 
 
 def job_callback(job):
-    result = job.result
-
-    if result is not None:
-        for e in result:
-            tqdm.write(e)
-    else:
-        tqdm.write(
-            " -- %s Fatal error on node %s message from node follows -> \n%s"
-            % (print_datetime(), job.ip_addr, job.exception)
-        )
+    if job.result is None:
+        raise RuntimeError(f"Daily processing failed on {job.ip_addr}: {job.exception}")
+    if job.result:
+        raise RuntimeError("\n".join(job.result))
 
 
 def run_gamit_session(params, dry_run, run_id):
@@ -886,28 +843,36 @@ def run_gamit_session(params, dry_run, run_id):
         )
         # Persist processing statistics before acknowledging success. Losing
         # the CLI callback after publication cannot unmark finished sessions.
-        successful = [result for result in results if result["success"]]
-        if successful:
-            prepared = Path(params["prepared_pwd"])
-            destination = Path(params["solution_pwd"])
-            marker = ".geode-publish-pending"
-            (prepared / marker).write_text(run_id)
-            subnet = params["subnet_record"]
-            scope = {k: subnet[k] for k in ("Project", "Year", "DOY", "subnet")}
-            fields = cnn.get_columns("gamit_stats")
-            stats = [
-                {k: value for k, value in result.items() if k in fields}
-                for result in successful
-            ]
+        if dry_run or any(not result["success"] for result in results):
+            return results
+        systems = [result["system"] for result in results]
+        if not systems or sorted(systems) != sorted(task.systems):
+            raise ValueError(
+                f"Incomplete constellation results: expected {task.systems}, got {systems}"
+            )
+        prepared = Path(params["prepared_pwd"])
+        gamit_session.validate_subnet_products(
+            prepared / "glbf", task.gamitopts["org"], task.date
+        )
+        destination = Path(params["solution_pwd"])
+        marker = ".geode-publish-pending"
+        (prepared / marker).write_text(run_id)
+        subnet = params["subnet_record"]
+        scope = {k: subnet[k] for k in ("Project", "Year", "DOY", "subnet")}
+        fields = cnn.get_columns("gamit_stats")
+        stats = [
+            {k: value for k, value in result.items() if k in fields}
+            for result in results
+        ]
 
-            def save_stats():
-                with cnn.cnn.transaction():
-                    gamit_session.replace_product(cnn, "gamit_subnets", scope, [subnet])
-                    gamit_session.replace_product(cnn, "gamit_stats", scope, stats)
+        def save_stats():
+            with cnn.cnn.transaction():
+                gamit_session.replace_product(cnn, "gamit_subnets", scope, [subnet])
+                gamit_session.replace_product(cnn, "gamit_stats", scope, stats)
 
-            check_current()
-            gamit_session.publish_directory(prepared, destination, confirm=save_stats)
-            (destination / marker).unlink()
+        check_current()
+        gamit_session.publish_directory(prepared, destination, confirm=save_stats)
+        (destination / marker).unlink()
         return results
 
 

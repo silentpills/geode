@@ -1,6 +1,8 @@
 """Processing-job manifests, daily product replacement, and scratch publication."""
 
 import json
+import os
+import subprocess
 from contextlib import closing, nullcontext
 from importlib.resources import files
 from pathlib import Path
@@ -11,13 +13,30 @@ import pytest
 from psycopg.rows import dict_row
 
 from com import ParallelGamit
-from geode import compute_wire, dbConnection
+from geode import compute_wire, dbConnection, pyJobServer
 from geode.gamit import campaign, gamit_session, gamit_task, globk_task, parse_ztd
 from geode.pyDate import Date
 
 
 def wire_round_trip(value):
     return compute_wire.decode(json.loads(json.dumps(compute_wire.encode(value))))
+
+
+def write_products(directory, date, station="TEST"):
+    directory.mkdir(exist_ok=True)
+    (directory / "hfixture.glx").write_bytes(b"fixture")
+    (directory / f"TST{date.wwwwd()}.znd").write_text(
+        f"ATM_ZEN X {station} XX 2024 4 9 0 0 0 2.000 +0.100 3.000\n"
+    )
+    (directory / f"TST{date.wwwwd()}.snx").write_text(
+        "+SOLUTION/ESTIMATE\n"
+        + "".join(
+            f" {n} STA{axis} {station} A 1 24:100:43200 m 2 .100E+01 .100E+01\n"
+            for n, axis in enumerate("XYZ", 1)
+        )
+        + "-SOLUTION/ESTIMATE\n+SOLUTION/MATRIX_ESTIMATE L COVA\n"
+        " 1 1 1.0\n 2 1 0.1 1.0\n 3 1 0.2 0.3 1.0\n-SOLUTION/MATRIX_ESTIMATE L COVA\n"
+    )
 
 
 @pytest.fixture
@@ -94,7 +113,7 @@ def test_gamit_dry_run_from_session_manifest(tmp_path, monkeypatch, local_guard)
     assert not (tmp_path / "published").exists()
     (failure,) = ParallelGamit.run_gamit_session(encoded, False, "attempt-2")
     assert not failure["success"]
-    assert "No configured constellation" in failure["error"]
+    assert "Fewer than two observing stations" in failure["fatals"][0]
     assert wire_round_trip(failure) == failure
 
 
@@ -147,12 +166,12 @@ def test_session_product_inputs_preserve_ztd_and_station_aliases(
         )
     ]
 
-    (tmp_path / "sample.snx").touch()
+    (tmp_path / f"TST{date.wwwwd()}.snx").touch()
     vertex = SimpleNamespace(
         X=1, Y=2, Z=3, sigX=1, sigY=2, sigZ=3, sigXY=4, sigXZ=5, sigYZ=6
     )
     monkeypatch.setattr(
-        globk_task.snxParse,
+        gamit_session.snxParse,
         "snxFileParser",
         lambda path: SimpleNamespace(
             parse=lambda: None, stationDict={"TEST": vertex}, varianceFactor=4
@@ -256,7 +275,7 @@ def test_campaign_fences_stale_purge_and_overlapping_work(
         "gamit_ztd",
     ):
         db.execute(
-            f'CREATE TABLE {table} ("Project" text, "Year" int, "DOY" int, subnet int)'
+            f'CREATE TABLE {table} ("Project" text, "Year" int, "DOY" int, subnet int, system text)'
         )
     date = Date(year=2024, doy=100)
     solution = tmp_path / "geod"
@@ -267,7 +286,9 @@ def test_campaign_fences_stale_purge_and_overlapping_work(
         with pytest.raises(
             gamit_session.GamitSessionException, match="move only this session"
         ):
-            gamit_session.completed_session(first, solution, row_key)
+            gamit_session.completed_session(
+                first, solution, row_key, ["G"], "TST", date
+            )
         with campaign.campaign_run(first, "geod", [date]) as old:
             with pytest.raises(RuntimeError, match="Another campaign"):
                 with campaign.campaign_run(second, "geod", [date]):
@@ -315,7 +336,9 @@ def test_campaign_fences_stale_purge_and_overlapping_work(
                 'SELECT "Project" FROM gamit_subnets ORDER BY "Project"'
             ).fetchall() == [("geod.TST002",), ("geod.extra",)]
             assert not solution.exists()
-            assert not gamit_session.completed_session(second, solution, row_key)
+            assert not gamit_session.completed_session(
+                second, solution, row_key, ["G"], "TST", date
+            )
 
 
 def test_targeted_subnet_replacement_preserves_previous_until_both_outputs_commit(
@@ -338,23 +361,28 @@ def test_targeted_subnet_replacement_preserves_previous_until_both_outputs_commi
     dest = tmp_path / "2024/100/geod.TST001"
     dest.mkdir(parents=True)
     (dest / "result").write_text("original")
+    write_products(dest / "glbf", date)
 
     def simulate_solver(self, *args, **kwargs):
         (Path(self.solution_pwd) / "result").write_text("replacement")
+        write_products(Path(self.solution_pwd) / "glbf", date)
         return [
             dict(
                 Project="geod",
                 Year=2024,
                 DOY=100,
                 subnet=1,
-                system="G",
+                system=system,
                 nrms=nrms,
-                success=True,
+                success=(system not in failures),
             )
+            for system in reported
         ]
 
     monkeypatch.setattr(gamit_task.GamitTask, "start", simulate_solver)
-    config = SimpleNamespace(gamitopt={"solutions_dir": str(tmp_path)})
+    config = SimpleNamespace(
+        gamitopt={"solutions_dir": str(tmp_path), "org": "TST", "systems": ["G", "E"]}
+    )
     with (
         closing(connect()) as coordinator,
         campaign.campaign_run(coordinator, "geod", [date]) as run,
@@ -374,10 +402,26 @@ def test_targeted_subnet_replacement_preserves_previous_until_both_outputs_commi
             DirName=session.DirName,
             NetName=session.NetName,
             date=date,
-            gamitopts={"systems": ["G"]},
+            gamitopts={"systems": ["G", "E"], "org": "TST"},
             orbits={},
             subnet_record=session.subnet_record,
         )
+        nrms = 1
+        reported = ["G", "E"]
+        failures = {"E"}
+        assert not all(
+            r["success"] for r in ParallelGamit.run_gamit_session(params, False, run)
+        )
+        assert (dest / "result").read_text() == "original"
+        assert db.execute("SELECT system,nrms,api_id FROM gamit_stats").fetchall() == [
+            ("G", 0.25, 1)
+        ]
+        reported = ["G"]
+        failures = set()
+        with pytest.raises(ValueError, match="Incomplete constellation"):
+            ParallelGamit.run_gamit_session(params, False, run)
+        assert (dest / "result").read_text() == "original"
+        reported = ["G", "E"]
         nrms = -1
         with pytest.raises(psycopg.errors.CheckViolation):
             ParallelGamit.run_gamit_session(params, False, run)
@@ -394,5 +438,162 @@ def test_targeted_subnet_replacement_preserves_previous_until_both_outputs_commi
             [],
             1,
         )
-        assert db.execute("SELECT nrms,api_id FROM gamit_stats").fetchone() == (0.5, 1)
+        assert db.execute(
+            "SELECT nrms,api_id FROM gamit_stats WHERE system='G'"
+        ).fetchone() == (0.5, 1)
+        assert db.execute(
+            "SELECT nrms FROM gamit_stats WHERE system='E'"
+        ).fetchone() == (0.5,)
+        assert gamit_session.completed_session(
+            coordinator, dest, session.subnet_record, ["G", "E"], "TST", date
+        )
+        (dest / "glbf" / f"TST{date.wwwwd()}.snx").unlink()
+        assert not gamit_session.completed_session(
+            coordinator, dest, session.subnet_record, ["G", "E"], "TST", date
+        )
         assert not (dest / ".geode-publish-pending").exists()
+
+
+@pytest.mark.parametrize(
+    "unusable", ["missing", "empty", "unparseable", "foreign", "truncated"]
+)
+def test_incomplete_subnet_ztd_keeps_whole_prior_day(
+    tmp_path, connect, postgres_connection, unusable
+):
+    date = Date(year=2024, doy=100)
+    db = postgres_connection
+    db.execute(
+        """CREATE TABLE gamit_ztd ("Project" text, "Year" int, "DOY" int, "NetworkCode" text, "StationCode" text, "Date" timestamp, model float, sigma float, "ZTD" float, api_id serial, PRIMARY KEY ("Project","Year","DOY","NetworkCode","StationCode","Date"))"""
+    )
+    products = []
+    for station in ("FIRS", "NEXT"):
+        directory = tmp_path / station
+        write_products(directory, date, station)
+        products.append(
+            dict(
+                directory=str(directory),
+                name=station,
+                date=date,
+                stations=[(station, "net", station.lower())],
+            )
+        )
+    task = parse_ztd.ParseZtdTask("TST", "geod", products, date)
+    with closing(connect()) as cnn:
+        assert task.execute(cnn) == []
+        query = 'SELECT "StationCode", "ZTD", api_id FROM gamit_ztd ORDER BY 1'
+        previous = db.execute(query).fetchall()
+        assert previous == [("firs", 3.0, 1), ("next", 3.0, 2)]
+        (Path(products[0]["directory"]) / f"TST{date.wwwwd()}.znd").write_text(
+            "ATM_ZEN X FIRS XX 2024 4 9 0 0 0 2.000 +0.100 6.000\n"
+        )
+        other = Path(products[1]["directory"]) / f"TST{date.wwwwd()}.znd"
+        if unusable == "missing":
+            other.unlink()
+        else:
+            other.write_text(
+                {
+                    "empty": "",
+                    "unparseable": "invalid",
+                    "truncated": "ATM_ZEN X NEXT  1 2024 4 9 0 0 0.1234 +-   0.0086 2.6643\nATM_ZEN X NEXT  1 2024 4 9 2 0 0.1234 +-",
+                    "foreign": "ATM_ZEN X FIRS XX 2024 4 9 0 0 0 2.000 +0.100 3.000\n",
+                }[unusable]
+            )
+        errors = task.execute(cnn)
+        assert len(errors) == 1 and "NEXT" in errors[0]
+        assert db.execute(query).fetchall() == previous
+
+
+def test_globk_requires_one_glx_from_each_subnet(tmp_path):
+    date = Date(year=2024, doy=100)
+    destination = tmp_path / "combined"
+    destination.mkdir()
+    previous = destination / "previous"
+    previous.write_bytes(b"preserved")
+    products = []
+    for name in ("subnet1", "subnet2"):
+        directory = tmp_path / name
+        directory.mkdir()
+        products.append(dict(name=name, directory=str(directory)))
+    (tmp_path / "subnet1" / "hfirst.glx").write_bytes(b"input")
+    task = globk_task.Globk(
+        str(destination),
+        date,
+        products,
+        options=dict(org="TST", eop_type="usno", expt="geod"),
+    )
+    for contents in (None, b"", b"duplicate"):
+        if contents is not None:
+            (tmp_path / "subnet2" / "hsecond.glx").write_bytes(contents)
+            if contents:
+                (tmp_path / "subnet2" / "hother.glx").write_bytes(b"unexpected")
+        with pytest.raises(ValueError, match="subnet2"):
+            task.execute(store_result=lambda _: pytest.fail("Partial replacement"))
+        assert previous.read_bytes() == b"preserved"
+
+
+def test_globk_rejected_or_missing_input_is_not_a_complete_combination(tmp_path):
+    report = tmp_path / "out.prt"
+    names = ["../gsoln/G/hday.glx", "../gsoln/E/hday.glx"]
+    for status in ("NOT USED", "NO DATA", "USED"):
+        report.write_text(
+            f" 1 {names[0]} 1.0 0.0 0.1 -1.0 USED\n 2 {names[1]} 4.0 0.0 0.2 -1.0 {status}\n"
+        )
+        if status == "USED":
+            globk_task.verify_globk_inputs(report, names)
+        else:
+            with pytest.raises(globk_task.GlobkException, match=names[1]):
+                globk_task.verify_globk_inputs(report, names)
+
+
+def test_glbtosnx_nonzero_exit_propagates_even_if_it_writes_an_output(
+    tmp_path, monkeypatch
+):
+    date = Date(year=2024, doy=100)
+    params = dict(
+        DirName="sample",
+        NetName="geod",
+        orbits={},
+        gamitopts={"org": "TST", "systems": ["G"]},
+        date=date,
+    )
+    task = gamit_task.GamitTask(str(tmp_path), params, str(tmp_path))
+    task.success = True
+    directory = tmp_path / "glbf"
+    directory.mkdir()
+    (directory / "hday.glx").write_bytes(b"input")
+    converter = tmp_path / "glbtosnx"
+    converter.write_text('#!/bin/sh\necho partial > "$4"\nexit 23\n')
+    converter.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        task.finish()
+    assert error.value.returncode == 23
+    assert (directory / f"TST{date.wwwwd()}.snx").read_text() == "partial\n"
+
+
+def test_campaign_coordinator_surfaces_scientific_job_failure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(pyJobServer, "check_processing_environment", lambda *_: None)
+    result = [
+        {
+            "success": False,
+            "session": "geod.001",
+            "system": "E",
+            "nrms": 0,
+            "wl": 0,
+            "fatals": ["fixture failure"],
+        }
+    ]
+    with pyJobServer.JobServer(SimpleNamespace(run_parallel=False)) as server:
+        server.create_cluster(lambda: result, callback=ParallelGamit.gamit_callback)
+        server.submit()
+        with pytest.raises(RuntimeError, match="GAMIT failed for geod.001"):
+            server.wait()
+        assert "fixture failure" in (tmp_path / "FATAL.log").read_text()
+
+        server.create_cluster(
+            lambda: ["missing subnet"], callback=ParallelGamit.job_callback
+        )
+        server.submit()
+        with pytest.raises(RuntimeError, match="missing subnet"):
+            server.wait()

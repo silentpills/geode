@@ -20,7 +20,8 @@ import numpy
 
 # app
 from geode import pyProducts, pyRinex
-from geode.gamit.gamit_session import publish_directory
+from geode.gamit.gamit_session import publish_directory, subnet_glx, zenith_delays
+from geode.gamit.globk_task import verify_globk_inputs
 from geode.Utils import (
     chmod_exec,
     file_append,
@@ -113,6 +114,7 @@ class GamitTask(object):
             self.execute(
                 'find ./tables ! -name "otl.grid" -type l -exec ./replace_links.sh {} +',
                 shell=True,
+                check=True,
             )
             self.log("Pre-process tasks (symlink fix) finished with no errors")
 
@@ -133,43 +135,31 @@ class GamitTask(object):
                     if self.system_count[sys] > 1:
                         results.append(self.run_gamit(sys))
                     else:
-                        self.log(
-                            f"Not enough observing stations for system {sys}. Skipping processing."
-                        )
+                        failure = self.run_gamit(sys, dummy=True)
+                        failure["fatals"] = [
+                            f"Fewer than two observing stations for requested system {sys}"
+                        ]
+                        self.log(failure["fatals"][0])
+                        results.append(failure)
 
                 if not results:
-                    raise ValueError(
-                        "No configured constellation has two observing stations"
-                    )
+                    raise ValueError("No configured constellations")
 
-                # combination in GLOBK
-                success_results = [r for r in results if r["success"]]
-                if len(success_results) > 1:
-                    self.log("Combination between systems needed.")
-                    self.combine_systems(success_results)
-                    self.success = True
-                elif len(success_results) == 1:
-                    self.log("Single system result, using as final GLX.")
-                    # just copy the system result to glbf
-                    shutil.copyfile(
-                        os.path.join(
-                            self.pwd,
-                            "gsoln/"
-                            + success_results[0]["system"]
-                            + "/"
-                            + success_results[0]["glbf"],
-                        ),
-                        os.path.join(self.pwd_glbf, success_results[0]["glbf"]),
-                    )
-                    self.success = True
-                else:
-                    # a problem with all systems, declare fatal
-                    self.log("No valid system solutions. Check fatals.")
-
+                self.success = all(r["success"] for r in results)
                 if self.success:
-                    # combine zenith tropospheric delays
+                    Path(self.pwd_glbf).mkdir(exist_ok=True)
+                    if len(results) > 1:
+                        self.log("Combination between systems needed.")
+                        self.combine_systems(results)
+                    else:
+                        self.log("Single system result, using as final GLX.")
+                        system_path = Path(self.pwd) / "gsoln" / results[0]["system"]
+                        shutil.copyfile(
+                            subnet_glx(system_path),
+                            Path(self.pwd_glbf) / results[0]["glbf"],
+                        )
                     self.log("Merging all tropospheric estimates in a single file.")
-                    self.process_tropo(success_results)
+                    self.process_tropo(results)
 
                 self.finish()
 
@@ -191,7 +181,9 @@ class GamitTask(object):
                 except OSError as error:
                     msg += f"\nUnable to publish diagnostics from {self.pwd}: {error}"
 
-            results = self.run_gamit("G", dummy=True)
+            results = self.run_gamit(
+                self.systems[0] if self.systems else "G", dummy=True
+            )
             results["error"] = msg
 
             # return useful information to the main node (return list because now there is one result per system)
@@ -213,23 +205,16 @@ class GamitTask(object):
 
         znd = os.path.join(self.pwd_glbf, org + self.date.wwwwd() + ".znd")
 
-        for result in results:
-            trp = os.path.join(
-                self.pwd,
-                "gsoln/" + result["system"] + "/" + org + self.date.wwwwd() + ".trp",
-            )
-            if os.path.isfile(trp):
-                # read the content of the file
-                output = file_readlines(trp)
-                v = re.findall(
-                    r"(ATM_ZEN X \w+ .. \d+\s*\d*\s*\d*\s*\d*\s*\d*\s*\d*\s*[- ]?"
-                    r"\d*.\d+\s*[+-]*\s*\d*.\d*\s*\d*.\d*)",
-                    "".join(output),
-                    re.MULTILINE,
+        with file_open(znd, "w") as output:
+            for result in results:
+                trp = (
+                    Path(self.pwd)
+                    / "gsoln"
+                    / result["system"]
+                    / f"{org}{self.date.wwwwd()}.trp"
                 )
-                # output all the lines into a single znd file in glbf that will be read by pyParseZTD
-                for line in v:
-                    file_append(znd, line + "\n")
+                for match in zenith_delays(trp):
+                    output.write(match[0] + "\n")
 
     def combine_systems(self, results):
         # create a globk.cmd file for the combination
@@ -272,8 +257,13 @@ class GamitTask(object):
         gdl_file.close()
 
         self.execute(
-            "cd glbf; globk 0 out.prt globk.log hfiles.gdl globk.cmd > globk.out",
+            "cd glbf && globk 0 out.prt globk.log hfiles.gdl globk.cmd > globk.out 2>&1",
             shell=True,
+            check=True,
+        )
+        verify_globk_inputs(
+            Path(self.pwd_glbf) / "out.prt",
+            [f"../gsoln/{r['system']}/{r['glbf']}" for r in results],
         )
 
         # now parse the output for any problems
@@ -290,7 +280,7 @@ class GamitTask(object):
             no_timestamp=True,
         )
 
-    def execute(self, script_name, shell=False):
+    def execute(self, script_name, shell=False, *, check=False):
         self.p = subprocess.Popen(
             script_name,
             shell=shell,
@@ -300,6 +290,10 @@ class GamitTask(object):
         )
 
         self.stdout, self.stderr = self.p.communicate()
+        if check and self.p.returncode:
+            raise subprocess.CalledProcessError(
+                self.p.returncode, script_name, self.stdout, self.stderr
+            )
 
     def fetch_orbits(self):
         self.log("fetching orbits")
@@ -448,85 +442,80 @@ class GamitTask(object):
             Rinex.window_data(end=dt)
 
     def finish(self):
-        try:
-            gpswday = self.date.gpsWeekDay
-            gpsweek = self.date.wwww()
-            org = self.gamitopts["org"]
-            sinex = f"{org}{gpsweek}{gpswday}.snx"
+        gpswday = self.date.gpsWeekDay
+        gpsweek = self.date.wwww()
+        org = self.gamitopts["org"]
+        sinex = f"{org}{gpsweek}{gpswday}.snx"
 
-            if self.success:
-                self.log(f"Successful run: Generating SINEX file {sinex} in glbf.")
+        if self.success:
+            self.log(f"Successful run: Generating SINEX file {sinex} in glbf.")
 
-                self.execute(
-                    f'glbtosnx . "" glbf/h*.glx glbf/{sinex} >> glbf/glbtosnx.out',
-                    shell=True,
+            glx = subnet_glx(self.pwd_glbf)
+            with open(Path(self.pwd_glbf) / "glbtosnx.out", "wb") as log:
+                subprocess.run(
+                    ["glbtosnx", ".", "", glx.name, sinex],
+                    cwd=self.pwd_glbf,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=True,
                 )
 
-                self.log("Deleting tables and RINEX files and processing dir.")
-                # delete everything inside the processing dir
-                shutil.rmtree(self.pwd_brdc)
-                shutil.rmtree(self.pwd_igs)
+            self.log("Deleting tables and RINEX files and processing dir.")
+            # delete everything inside the processing dir
+            shutil.rmtree(self.pwd_brdc)
+            shutil.rmtree(self.pwd_igs)
 
-                # files to remove from tables only if successful
-                erase_tables = (
-                    "*.??o",
-                    "*.grid",
-                    "*.dat",
-                    "*.apr",
-                    "nbody",
-                    "pole.*",
-                    "ut1.*",
-                )
-                # files to remove from processing directory
-                erase_process = ("*.??o", "z*", "*.grid", "*.dat", "*.apr")
+            # files to remove from tables only if successful
+            erase_tables = (
+                "*.??o",
+                "*.grid",
+                "*.dat",
+                "*.apr",
+                "nbody",
+                "pole.*",
+                "ut1.*",
+            )
+            # files to remove from processing directory
+            erase_process = ("*.??o", "z*", "*.grid", "*.dat", "*.apr")
 
-            else:
-                self.log(
-                    "Deleting only RINEX and .grid files. Other files preserved for diagnostic purposes."
-                )
-
-                # files to remove from tables (unsuccessful)
-                erase_tables = ("*.??o", "*.grid", "antmod.dat")
-                # files to remove from processing directory
-                erase_process = ("*.??o", "*.grid", "rcvant.*")
-
-            # remove files from tables files only if successful
-            for ftype in erase_tables:
-                for ff in glob.glob(os.path.join(self.pwd_tables, ftype)):
-                    os.remove(ff)
-
-            # remove files from processing directory
-            for system in self.systems:
-                for ftype in erase_process:
-                    for ff in glob.glob(
-                        os.path.join(self.pwd, f"{self.date.ddd()}{system}/{ftype}")
-                    ):
-                        os.remove(ff)
-
-            # remove files in rinex files ALWAYS
-            for ff in glob.glob(os.path.join(self.pwd_rinex, "*")):
-                os.remove(ff)
-
-            # new feature: compress autcln files to release more disk space
-            for system in self.systems:
-                for ftype in ("autcln.*", "autcln.*.sum*"):
-                    for ff in glob.glob(
-                        os.path.join(self.pwd, f"{self.date.ddd()}{system}/{ftype}")
-                    ):
-                        with zipfile.ZipFile(
-                            f"{ff}.gz", "w", zipfile.ZIP_DEFLATED, allowZip64=True
-                        ) as zf:
-                            zf.write(ff, os.path.basename(ff))
-                        os.remove(ff)
-
-        except:
-            msg = traceback.format_exc() + "\nProcessing %s date %s on node %s" % (
-                self.params["NetName"],
-                self.date.yyyyddd(),
-                platform.node(),
+        else:
+            self.log(
+                "Deleting only RINEX and .grid files. Other files preserved for diagnostic purposes."
             )
 
-            self.log(f"ERROR in GamitTask.finish()\n{msg}")
+            # files to remove from tables (unsuccessful)
+            erase_tables = ("*.??o", "*.grid", "antmod.dat")
+            # files to remove from processing directory
+            erase_process = ("*.??o", "*.grid", "rcvant.*")
+
+        # remove files from tables files only if successful
+        for ftype in erase_tables:
+            for ff in glob.glob(os.path.join(self.pwd_tables, ftype)):
+                os.remove(ff)
+
+        # remove files from processing directory
+        for system in self.systems:
+            for ftype in erase_process:
+                for ff in glob.glob(
+                    os.path.join(self.pwd, f"{self.date.ddd()}{system}/{ftype}")
+                ):
+                    os.remove(ff)
+
+        # remove files in rinex files ALWAYS
+        for ff in glob.glob(os.path.join(self.pwd_rinex, "*")):
+            os.remove(ff)
+
+        # new feature: compress autcln files to release more disk space
+        for system in self.systems:
+            for ftype in ("autcln.*", "autcln.*.sum*"):
+                for ff in glob.glob(
+                    os.path.join(self.pwd, f"{self.date.ddd()}{system}/{ftype}")
+                ):
+                    with zipfile.ZipFile(
+                        f"{ff}.gz", "w", zipfile.ZIP_DEFLATED, allowZip64=True
+                    ) as zf:
+                        zf.write(ff, os.path.basename(ff))
+                    os.remove(ff)
 
     def move_pwd_to_solution_dir(self, check_current=None):
         destination = Path(self.solution_pwd)
@@ -678,6 +667,7 @@ class GamitTask(object):
             echo "{sdate}run_{system}.sh" >> monitor.log
             # execute GAMIT
             sh_gamit -gnss {system} -update_l N -topt none -c -copt null {"-noftp" if noftp == "yes" else ""} -dopt c x -expt {expt} -d {year} {doy} -minspan {min_t} -remakex Y -eop {eop} &> {outfile};
+            gamit_status=$?
             
             # remove extraneous lfiles
             # rm ./{doy}{system}/l*[ab].*;
@@ -685,6 +675,7 @@ class GamitTask(object):
             # make sure to rename the gfilea to the correct gfile[0-9].doy
             # this line is inherited from Abel, not sure about how it's used. Leave just in case.
             [ -e ./igs/gfilea.* ] && mv -f ./igs/gfilea* ./*/gfile[0-9]*
+            exit "$gamit_status"
             """
 
             run_file.write(contents)
@@ -694,6 +685,7 @@ class GamitTask(object):
             # before executing, make a copy of the lfile
             shutil.copyfile(lfile_path, lfile_path + str(i))
             self.execute("./" + os.path.basename(run_file_path))
+            gamit_status = self.p.returncode
 
             # read the contents of the output files (summary may not exist)
             try:
@@ -853,12 +845,14 @@ class GamitTask(object):
         result["iterations"] = last_i
 
         # extract any FATALS
-        if re.findall(r".*?FATAL.*", output) or summary == "":
+        if gamit_status or re.findall(r".*?FATAL.*", output) or summary == "":
             self.log("\n".join(re.findall(r"(.*?FATAL.*)", output)), no_timestamp=True)
             fatal = True
             # save the fatals as a list
             result["fatals"] = list(dict.fromkeys(re.findall(r"(.*?FATAL.*)", output)))
 
+            if gamit_status:
+                result["fatals"].append(f"sh_gamit exited with status {gamit_status}")
             self.log(f"Unsuccessful run for system {system}. Check fatal message.")
         else:
             # extract the run statistics and write it to the monitor
@@ -892,24 +886,24 @@ class GamitTask(object):
                 # log to the monitor
                 echo "{sdate}finish_{system}.sh" >> monitor.log
                 
-                cd gsoln/{system}
+                cd gsoln/{system} || exit $?
                 # link the svnav file in tables
                 ln -s ../../tables/svnav.dat .
     
                 # create the binary h-file
-                htoglb . tmp.svs -a ../../{doy}{system}/h*.{year[2:]}{doy}  >> htoglb.out
+                htoglb . tmp.svs -a ../../{doy}{system}/h*.{year[2:]}{doy}  >> htoglb.out || exit $?
                 
                 # grep any missing stations to report them to monitor.log
                 grep 'No data for site ' htoglb.out | sort | uniq >> ../../monitor.log
         
                 # clean up
-                rm HTOGLB.* tmp.svs l*  svnav.dat
+                rm -f HTOGLB.* tmp.svs l* svnav.dat
                 """
 
                 finish_file.write(contents)
                 finish_file.close()
                 chmod_exec(finish_file_path)
-                self.execute("./" + os.path.basename(finish_file_path))
+                self.execute("./" + os.path.basename(finish_file_path), check=True)
 
                 # retrieve no data for site x
                 htoglb = "".join(
@@ -922,7 +916,7 @@ class GamitTask(object):
                     set(re.findall(r"No data for site (\w+)", htoglb))
                 )
 
-                hfile = glob.glob(os.path.join(self.pwd, f"gsoln/{system}/h*.glx"))[0]
+                hfile = str(subnet_glx(Path(self.pwd) / "gsoln" / system))
                 # only write the filename, not the path
                 result["glbf"] = os.path.basename(hfile)
 
