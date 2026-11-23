@@ -1,0 +1,32 @@
+services:
+  compute-redis:
+    image: redis:8.10.3-alpine
+    profiles: [compute-broker]
+    networks: [compute]
+    # Native GNSS workers on the same host consume this private, persistent broker.
+    ports:
+      - "127.0.0.1:${GEODE_REDIS_PORT:-6380}:6379"
+    environment:
+      REDISCLI_AUTH: ${GEODE_REDIS_PASSWORD:-}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        : "$${REDISCLI_AUTH:?Set GEODE_REDIS_PASSWORD for the compute broker}"
+        exec /usr/local/bin/docker-entrypoint.sh redis-server --appendonly yes --requirepass "$$REDISCLI_AUTH"
+    volumes:
+      - compute-queue:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  compute-queue:
+
+networks:
+  compute:
