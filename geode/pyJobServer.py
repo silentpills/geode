@@ -269,7 +269,12 @@ class JobServer:
             label = f"{station['NetworkCode']}.{station['StationCode']}"
         elif self.operation == "com.ParallelGamit.run_gamit_session":
             label = arguments[0]["date"].yyyyddd()
-        compute_receipts.register(job.id, self.operation, fingerprint, label)
+        try:
+            compute_receipts.register(job.id, self.operation, fingerprint, label)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not register receipt {job.id}; job was not published"
+            ) from exc
         tqdm.write(f" >> {self.operation} job {job.id}")
         try:
             handle = execute.apply_async(
@@ -412,7 +417,10 @@ class JobServer:
         if self.run_parallel:
             for job, handle, _deadline in pending:
                 # Do not terminate an in-flight archive write or GAMIT process.
-                self._cancel_remote(job, handle)
+                try:
+                    self._cancel_remote(job, handle)
+                except Exception as exc:
+                    tqdm.write(f" >> Could not confirm cancellation of {job.id}: {exc}")
         else:
             for future in pending:
                 future.cancel()

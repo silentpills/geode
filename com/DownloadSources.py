@@ -191,6 +191,9 @@ class Msg:
     class FILE_SKIPPED_INACTIVE_STATION(NamedTuple):
         file: FileDescriptor
 
+    class FILE_QUERY_FAILED(NamedTuple):
+        error: Exception
+
     # Messages from downloaders:
     class DOWNLOAD_RESULT(NamedTuple):
         server_id: int
@@ -517,7 +520,6 @@ class JobsManager:
                 " >> %d Cluster Nodes with %d CPUs will be used for File Processing"
                 % (len(nodes), self.cpus_qty)
             )
-            self._submit_pending()
 
     def on_job_result(self, job):
         """Deliver a completed conversion to the download coordinator."""
@@ -528,35 +530,33 @@ class JobsManager:
         # The coordinator drains a bounded queue and may itself be submitting
         # work. Never hold its submission lock while waiting for queue capacity.
         self.on_process_result(f, job.exception, job.infrastructure_error)
-        self._submit_pending()
 
     def _can_submit_more(self):
         # cpus * 2 only to keep processing workers supplied
         return not self.halted and len(self.jobs_submitted) < (self.cpus_qty * 2)
 
     def _submit(self, f: File):
-        with self.jobs_lock:
-            # If configured as runparallel,
-            # this will schedule an asynchrounous
-            # call of process_file() in another node, if not, will run
-            # asynchronously on a thread in this process.
-
-            # process_file(...) will be called
-            # with this args in the remote node.
+        # The caller holds jobs_lock until the returned ID can be matched to its file.
+        try:
             job = self.job_server.submit_async(
                 self.abspath_scripts_dir,
                 f.abspath_down_file,
                 f.source.format,
                 f.station.StationCode,
             )
-            self.jobs_submitted[job.id] = f
+        except Exception as exc:
+            self.halted = True
+            raise RuntimeError(
+                f"Could not submit conversion for {f.desc} {f.filename}: {exc}"
+            ) from exc
+        self.jobs_submitted[job.id] = f
+        if DEBUG:
+            tqdm.write(
+                "%s Submitted for processing format=%r" % (f.desc, f.source.format)
+            )
 
-            if DEBUG:
-                tqdm.write(
-                    "%s Submitted for processing format=%r" % (f.desc, f.source.format)
-                )
-
-    def _submit_pending(self):
+    def submit_pending(self):
+        """Refill available slots from the coordinator so submission failures reach it."""
         with self.jobs_lock:
             while self._can_submit_more() and not self.files_pending.is_empty():
                 fd = self.files_pending.pop()
@@ -790,11 +790,13 @@ def download_all_stations_data(
     jobs_manager.stations = stations
     jobs_manager.on_process_result = on_process_result
 
-    # 2- Start thread to Query DB for files
-    # stations_stopped = set()
-    _thread.start_new_thread(
-        thread_queue_all_files, (cnn, drange, stations, put_message)
-    )
+    def queue_all_files():
+        try:
+            thread_queue_all_files(cnn, drange, stations, put_message)
+        except Exception as exc:
+            put_message(Msg.FILE_QUERY_FAILED(exc))
+
+    _thread.start_new_thread(queue_all_files, ())
 
     # 3- Coordinate downloads & process
     pbar = tqdm(
@@ -813,6 +815,11 @@ def download_all_stations_data(
                     fd = msg.file
                     # query first source
                     queue_download(fd.stn_idx, fd.date_mjd, fd.src_idx)
+
+                elif isinstance(msg, Msg.FILE_QUERY_FAILED):
+                    raise RuntimeError(
+                        "Could not query the remaining downloads"
+                    ) from msg.error
 
                 elif isinstance(msg, Msg.FILE_SKIPPED_INACTIVE_STATION):
                     f = File.from_descriptor(stations, msg.file)
@@ -879,12 +886,12 @@ def download_all_stations_data(
                         queue_download(fd.stn_idx, fd.date_mjd, fd.src_idx)
 
                 elif isinstance(msg, Msg.PROCESS_RESULT):
+                    f = File.from_descriptor(stations, msg.file)
                     if msg.infrastructure_error:
                         raise RuntimeError(
-                            "Conversion outcome is unconfirmed. Inspect the job receipt "
-                            f"before retrying this file: {msg.infrastructure_error}"
+                            f"Conversion outcome is unconfirmed for {f.desc} {f.filename}. "
+                            f"Inspect the job receipt before retrying: {msg.infrastructure_error}"
                         )
-                    f = File.from_descriptor(stations, msg.file)
                     if msg.error:
                         tqdm.write(
                             "%s Process ERROR! format=%r: %s %s\n%s"
@@ -897,6 +904,7 @@ def download_all_stations_data(
                     else:
                         stats.process_ok += 1
                         file_finished(f, "PROCESS OK")
+                    jobs_manager.submit_pending()
 
     finally:
         closing.set()
@@ -1675,13 +1683,10 @@ def main():
             on_nodes_changed=jobs_mgr.on_nodes_changed,
         )
 
-        try:
+        with job_server:
             download_all_stations_data(
                 cnn, jobs_mgr, Config.repository_data_in, stnlist, drange
             )
-            job_server.wait()
-        finally:
-            job_server.close_cluster()
 
     except argparse.ArgumentTypeError as e:
         parser.error(str(e))
