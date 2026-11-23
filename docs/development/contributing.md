@@ -10,13 +10,18 @@ no package publication, release tagging, or changelog automation.
 ```bash
 git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
-pixi install --locked
+mise install
+pixi install --locked --all
 ```
 
-Use Pixi 0.80.0. Pixi owns the environments under `.pixi/envs/` in the checkout;
+Use the Pixi version pinned in `mise.toml`. Pixi owns the environments under `.pixi/envs/` in the checkout;
 do not create another uv/venv environment. `default` includes processing and dev
 tools; `web` adds Django tests; `runtime` contains the production backend without
 dev tools; `reports`, `docs`, `frontend`, and `audit` cover their named tasks.
+The dedicated `postgres` environment contains the database server, client,
+and backup tools. It has its own solve so its native libraries can differ from
+those required by the geospatial packages. Apple Silicon installs require
+macOS 13.3 or later for the PostgreSQL 19 binaries.
 
 ## Verification
 
@@ -33,7 +38,9 @@ pixi run --locked -e docs docs:build --strict
 pixi run --locked -e frontend frontend:build
 ```
 
-The API task starts isolated PostgreSQL clusters using Pixi's dev tools. It tests
+The processing and API test tasks automatically install the locked `postgres`
+environment. Pytest starts temporary local database clusters with its binaries.
+The API suite tests
 empty and existing schemas, repeated migrations, model/migration consistency,
 explicit administrator creation, readiness, backup/restore, antenna metadata,
 and the historical Django suite. It does not connect to your configured database.

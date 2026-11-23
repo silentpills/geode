@@ -1,7 +1,6 @@
 """FixPlate persistence on isolated PostgreSQL, without operational GNSS jobs."""
 
 import json
-import shutil
 import subprocess
 from decimal import Decimal
 from importlib.resources import files
@@ -20,11 +19,11 @@ from geode.reference_frames import frame_provenance, save_frame, source_epochs
 
 
 @pytest.fixture
-def frame_db(postgres_connection):
+def frame_db(postgres_connection, postgres_bin):
     connection = postgres_connection
     subprocess.run(
         [
-            shutil.which("psql"),
+            postgres_bin / "psql",
             "-h",
             connection.info.host,
             "-p",

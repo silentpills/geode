@@ -58,9 +58,9 @@ pixi run -e docs docs:build
 
 The tests include synthetic ETM fitting, subprocess behavior, station-info
 round trips, PPP residual parsing, an isolated PostgreSQL schema/migration test,
-HTML escaping, PDF/KMZ export, and offline campaign-planning checks. PostgreSQL
-executables are part of the Pixi dev feature; the database test creates and shuts
-down its own temporary server using a local Unix socket.
+HTML escaping, PDF/KMZ export, and offline campaign-planning checks. Database
+tests create and shut down a temporary server using a local Unix socket.
+The current [development workflow](contributing.md) describes the Pixi environments.
 
 The existing typecheck job remains informational and still reports issues; lint,
 formatting, and runtime tests are separate checks. CLI help smoke tests also
@@ -78,8 +78,8 @@ model history in migration 0037. Empty and existing processing databases now
 share one initialization command. Fresh migrations create no login accounts;
 use the explicit administrator command.
 
-Docker and API tests share the locked Pixi runtime, including the patched DRF
-3.17 series. Startup stops on migration failures, and readiness checks the actual
+At that revision, Docker and API tests shared the locked DRF 3.17 series.
+Startup stops on migration failures, and readiness checks the actual
 database/migration state. CI now includes the complete historical Django suite,
 frontend and documentation builds, and a fresh Docker deployment smoke test.
 The repaired Python audit found vulnerable dependencies that were updated;

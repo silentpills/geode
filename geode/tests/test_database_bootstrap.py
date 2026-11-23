@@ -1,7 +1,6 @@
 """Exercise the complete Django history on isolated PostgreSQL databases."""
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -37,12 +36,12 @@ def manage(cnn, *arguments, check=True, env=None):
 
 
 @pytest.mark.parametrize("starting_point", ["empty", "sql"])
-def test_complete_migration_chain(postgres_connection, starting_point):
+def test_complete_migration_chain(postgres_connection, postgres_bin, starting_point):
     cnn = postgres_connection
     if starting_point == "sql":
         subprocess.run(
             [
-                shutil.which("psql"),
+                postgres_bin / "psql",
                 "-h",
                 cnn.info.host,
                 "-p",
@@ -92,7 +91,7 @@ def test_historical_django_suite(postgres_connection):
     manage(postgres_connection, "test", "api", "--noinput", "--verbosity", "1")
 
 
-def test_admin_readiness_and_backup(postgres_connection, tmp_path):
+def test_admin_readiness_and_backup(postgres_connection, postgres_bin, tmp_path):
     cnn = postgres_connection
     manage(cnn, "migrate", "--noinput")
     missing = manage(
@@ -169,14 +168,22 @@ def test_admin_readiness_and_backup(postgres_connection, tmp_path):
         cnn.info.user,
     ]
     subprocess.run(
-        ["pg_dump", *connection_args, "-d", cnn.info.dbname, "-Fc", "-f", str(archive)],
+        [
+            postgres_bin / "pg_dump",
+            *connection_args,
+            "-d",
+            cnn.info.dbname,
+            "-Fc",
+            "-f",
+            str(archive),
+        ],
         check=True,
         capture_output=True,
     )
     cnn.execute("CREATE DATABASE restore_check")
     subprocess.run(
         [
-            "pg_restore",
+            postgres_bin / "pg_restore",
             *connection_args,
             "-d",
             "restore_check",

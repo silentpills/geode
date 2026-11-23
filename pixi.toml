@@ -1,7 +1,8 @@
 [workspace]
-requires-pixi = ">=0.80,<0.81"
+requires-pixi = "==0.84.2"
 channels = ["conda-forge"]
-platforms = ["osx-arm64", "linux-64"]
+# The conda-forge PostgreSQL 19 binaries require macOS 13.3 on Apple Silicon.
+platforms = [{ platform = "osx-arm64", macos = "13.3" }, "linux-64"]
 
 [dependencies]
 python = ">=3.13,<3.14"
@@ -36,7 +37,13 @@ types-requests = "*"
 types-paramiko = "*"
 # psycopg (v3) ships with inline type annotations (py.typed), no stub needed
 types-setuptools = "*"
-postgresql = ">=18.4,<19"
+
+# Keep the server tools independent of the GDAL/Qt native library constraints.
+[feature.postgres.dependencies]
+postgresql = "19.*"
+
+[feature.postgres.tasks]
+_postgres = "postgres --version"
 
 [feature.dev.pypi-dependencies]
 # Type checker (using ty by Astral - makers of ruff and uv)
@@ -78,6 +85,7 @@ web = { features = ["dev", "web"], solve-group = "default" }
 runtime = { features = ["web"], solve-group = "default" }
 frontend = { features = ["frontend"], no-default-feature = true }
 audit = { features = ["audit"], no-default-feature = true }
+postgres = { features = ["postgres"], no-default-feature = true }
 
 [feature.docs.pypi-dependencies]
 mkdocs = "*"
@@ -86,10 +94,10 @@ pymdown-extensions = "*"
 
 [tasks]
 # Testing
-test = { cmd = "pytest" }
-"test:api" = { cmd = "pytest geode/tests/test_antenna_api.py geode/tests/test_database_bootstrap.py" }
-"test:verbose" = { cmd = "pytest -v" }
-"test:cov" = { cmd = "pytest --cov=geode --cov-report=term-missing" }
+test = { cmd = "pytest", depends-on = [{ task = "_postgres", environment = "postgres" }] }
+"test:api" = { cmd = "pytest geode/tests/test_antenna_api.py geode/tests/test_database_bootstrap.py", depends-on = [{ task = "_postgres", environment = "postgres" }] }
+"test:verbose" = { cmd = "pytest -v", depends-on = [{ task = "_postgres", environment = "postgres" }] }
+"test:cov" = { cmd = "pytest --cov=geode --cov-report=term-missing", depends-on = [{ task = "_postgres", environment = "postgres" }] }
 
 # Linting and formatting
 lint = { cmd = "ruff check geode com tools web/backend/api/management" }
@@ -109,7 +117,7 @@ typecheck = { cmd = "ty check --output-format github geode com" }
 "precommit:run" = { cmd = "pre-commit run --all-files" }
 
 # All checks (useful for CI)
-check = { cmd = "ruff check geode com tools web/backend/api/management && ruff format --check geode com tools web/backend/api/management && pytest" }
+check = { depends-on = ["lint", "format:check", "test"] }
 # Utilities
 # check-external = "which gfzrnx && which crx2rnx && which gpspace && which sh_gamit"
 # pgamit = "pgamit --help"
@@ -117,8 +125,8 @@ check = { cmd = "ruff check geode com tools web/backend/api/management && ruff f
 
 # Backend/API tests use the same Django and DRF series as the backend image.
 [feature.web.pypi-dependencies]
-django = "~=5.2.11"
-djangorestframework = "~=3.17.2"
+django = "~=5.2.19"
+djangorestframework = "~=3.18.3"
 djangorestframework-simplejwt = "~=5.5.1"
 django-auditlog = "==3.0.0"
 django-filter = "==24.2"

@@ -1,9 +1,21 @@
 # Dependency triage: 2026-11-02
 
-Reviewed `dev` at `4d4ce3f`. The inventory below is a snapshot; scanner remediation
-is recorded in section 1, while application dependency upgrades remain planned.
+Reviewed `dev` at `4d4ce3f`. The inventory below is the November 2 snapshot.
+Section 1 records scanner remediation. The November 23 follow-up records the
+first runtime package updates.
 Deployment exposure below describes the committed
 Dockerfiles and application paths; no running installation was inspected.
+
+## November 23 runtime follow-up
+
+The Linux and Apple Silicon runtime locks now select Django 5.2.19, Django REST
+Framework 3.18.3, PyJWT 2.15.1, aiohttp 3.14.5, multidict 6.9.1, anyio 4.14.2,
+Soup Sieve 4.1.3, and yarl 1.25.1. These were the only eight changed runtime
+packages. On November 23, `pip-audit` reported zero known vulnerabilities
+across all 92 external PyPI packages in the new Linux runtime lock. The same
+audit had returned 42 advisory records across six packages before the updates.
+Conda libraries, container images, frontend packages, stored HTML, and SFTP
+server-key verification have separate review work remaining.
 
 ## Inventory and coverage
 

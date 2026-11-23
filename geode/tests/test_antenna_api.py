@@ -1,7 +1,6 @@
 """Backend integration tests; run with pixi run -e web pytest."""
 
 import importlib
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -11,7 +10,7 @@ pytest.importorskip("django", reason="Use the Pixi web environment for backend t
 
 
 @pytest.fixture
-def api_db(postgres_connection, monkeypatch):
+def api_db(postgres_connection, postgres_bin, monkeypatch):
     import django
     from django.conf import settings
 
@@ -38,7 +37,7 @@ def api_db(postgres_connection, monkeypatch):
     )
     subprocess.run(
         [
-            shutil.which("psql"),
+            postgres_bin / "psql",
             "-h",
             postgres_connection.info.host,
             "-p",

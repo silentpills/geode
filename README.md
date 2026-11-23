@@ -27,11 +27,12 @@ fork has no PyPI publication or release automation.
 
 ## Get started
 
-Use Pixi 0.80.0 to reproduce the committed Python 3.13 environments:
+Install the project-pinned Pixi with mise to reproduce the Python 3.13 environments:
 
 ```bash
 git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
+mise install
 pixi install --locked
 pixi run --locked python -m com.PlotETM --help
 ```

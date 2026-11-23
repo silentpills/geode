@@ -1,7 +1,8 @@
-"""Isolated PostgreSQL for integration tests, using the Pixi dev tools."""
+"""Isolated PostgreSQL for integration tests, using the dedicated Pixi server tools."""
 
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -9,20 +10,32 @@ import psycopg
 import pytest
 
 
+@pytest.fixture(scope="session")
+def postgres_bin():
+    """Use the sibling Pixi environment's matching server and client programs."""
+    prefix = Path(sys.prefix)
+    if (prefix / "conda-meta/pixi").exists():
+        bindir = prefix.parent / "postgres" / "bin"
+        if not (bindir / "initdb").is_file():
+            pytest.fail(
+                "Install the PostgreSQL tools with pixi install --locked -e postgres"
+            )
+        return bindir
+
+    initdb = shutil.which("initdb")
+    if initdb is None:
+        pytest.skip("PostgreSQL integration tests need the Pixi postgres environment")
+    return Path(initdb).resolve().parent
+
+
 @pytest.fixture
-def postgres_connection(tmp_path):
-    initdb, postgres, psql = (
-        shutil.which(name) for name in ("initdb", "postgres", "psql")
-    )
-    if not all((initdb, postgres, psql)):
-        pytest.skip("PostgreSQL test tools are included in the Pixi dev environment")
-    root = Path(__file__).resolve().parents[2]
+def postgres_connection(tmp_path, postgres_bin):
     cluster = tmp_path / "data"
     socket_dir = tmp_path / "socket"
     socket_dir.mkdir()
     subprocess.run(
         [
-            initdb,
+            postgres_bin / "initdb",
             "-D",
             str(cluster),
             "-A",
@@ -38,7 +51,7 @@ def postgres_connection(tmp_path):
     with (tmp_path / "postgres.log").open("w") as log:
         process = subprocess.Popen(
             [
-                postgres,
+                postgres_bin / "postgres",
                 "-D",
                 str(cluster),
                 "-k",

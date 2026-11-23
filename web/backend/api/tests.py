@@ -43,6 +43,20 @@ class CatalogTestCase(TestCase):
 
 
 class PermissionsTest(CatalogTestCase):
+    def test_refresh_issues_access_token_for_protected_api(self):
+        protected = reverse("station_list")
+        self.assertEqual(self.client.get(protected).status_code, 401)
+        tokens = self.client.post(reverse("token_obtain_pair"), {
+            "username": "admin", "password": "admin",
+        }).json()
+        refreshed = self.client.post(reverse("token_refresh"), {"refresh": tokens["refresh"]})
+        self.assertEqual(refreshed.status_code, 200, refreshed.content)
+        header = {"HTTP_AUTHORIZATION": "Bearer " + refreshed.json()["access"]}
+        self.assertEqual(self.client.get(protected, **header).status_code, 200)
+        self.assertEqual(self.client.post(
+            reverse("token_refresh"), {"refresh": tokens["access"]}
+        ).status_code, 401)
+
     def authenticate_admin(self):
         url = reverse("token_obtain_pair")
 

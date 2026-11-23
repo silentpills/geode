@@ -1,8 +1,8 @@
 # Installation
 
 Develop and deploy from this fork's `dev` branch. `main` is an upstream mirror.
-Use Pixi 0.80.0, matching CI and Docker, with the committed Python 3.13 and
-PostgreSQL 18 environments. This fork is installed from source and does not
+Use the Pixi version pinned in `mise.toml`, matching CI and Docker, with the
+committed Python 3.13 environments. This fork is installed from source and does not
 publish to PyPI.
 
 ## Checkout and configuration
@@ -10,12 +10,16 @@ publish to PyPI.
 ```bash
 git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
+mise install
 pixi install --locked
 cp .env.example .env
 cp gnss_data.cfg.example gnss_data.cfg
 ```
 
-Environments live in `.pixi/envs/`; no separate virtual environment is needed.
+With [mise activated](https://mise.jdx.dev/getting-started.html), `mise install`
+installs Pixi for the checkout. For an unactivated shell, prefix Pixi commands
+with `mise exec --`. To make every environment available locally, use
+`pixi install --locked --all`. Environments live in `.pixi/envs/`.
 Configure database credentials in `.env` and processing paths in `gnss_data.cfg`.
 See the [configuration reference](../reference/configuration.md).
 

@@ -23,7 +23,8 @@ not implemented architecture or a standing instruction to migrate it.
 
 ## Environments and verification
 
-Use Pixi 0.80.0 and `pixi install --locked`. Environments live in `.pixi/envs/`;
+Use `mise install` for the project-pinned Pixi and `pixi install --locked`.
+Use `pixi install --locked --all` for all environments. Environments live in `.pixi/envs/`;
 use the existing tasks instead of creating another virtual environment.
 `pixi.toml` and `pixi.lock` govern Python installation; frontend tasks use `npm ci`
 with `web/frontend/package-lock.json`.
@@ -44,8 +45,9 @@ informational and separate (`pixi run --locked typecheck`). Hooks check source;
 they do not format or fix it automatically.
 
 The API and PostgreSQL tests create temporary local clusters and do not use the
-configured application database. Run them as an unprivileged user with the Pixi
-PostgreSQL tools available. `db:migrate`, `db:check`, and `doctor` instead use the
+configured application database. Run them as an unprivileged user. Pixi test
+tasks install the isolated `postgres` tools environment. `db:migrate`,
+`db:check`, and `doctor` instead use the
 configured database; they are not substitutes for isolated tests. Real GNSS
 processing and deployment validation require external tools and infrastructure;
 state when these were not exercised.

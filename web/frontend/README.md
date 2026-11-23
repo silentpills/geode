@@ -1,6 +1,6 @@
 # GeoDE frontend
 
-Run from the repository root with Pixi 0.80.0:
+Run from the repository root with Pixi 0.84.2:
 
 ```bash
 pixi run -e frontend frontend:build

@@ -29,6 +29,7 @@ Developed by [Demian Gomez](https://github.com/demiangomez) and contributors, Ge
 ```bash
 git clone --branch dev https://github.com/silentpills/geode.git
 cd geode
+mise install
 pixi install --locked
 pixi shell
 ```

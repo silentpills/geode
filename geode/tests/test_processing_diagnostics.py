@@ -1,7 +1,6 @@
 """PPP residual parsing and real PostgreSQL schema regression tests."""
 
 import ast
-import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,13 +37,15 @@ def test_missing_residual_file_is_optional(tmp_path):
     assert result.elevation_residuals is None
 
 
-def test_processing_schema_is_repeatable_and_cascades(postgres_connection):
+def test_processing_schema_is_repeatable_and_cascades(
+    postgres_connection, postgres_bin
+):
     """Load the real schema, reapply Django SQL, and exercise the PPP foreign key."""
     cnn = postgres_connection
     root = Path(__file__).resolve().parents[2]
     subprocess.run(
         [
-            shutil.which("psql"),
+            postgres_bin / "psql",
             "-h",
             cnn.info.host,
             "-p",
