@@ -118,3 +118,27 @@ These ports do not add PRIDE, GLS noise fitting, station merging or new product
 selection. Those remain separate integrations requiring validation against the
 fork's scientific and database contracts. Real GFZRNX/GPSPACE processing still
 requires operational tools and representative observation data.
+
+## November 23, 2026
+
+The fork's `main` fast-forwarded 51 commits from `643cb77` to upstream
+`fb5bdf8`. The following changes were selected for `dev`:
+
+- Port `b19daa0` and `38de7bd` for plain compressed observations, short NOAA
+  `.o.gz` names (for example, `test0010.26o.gz`), short-name ZIP, and long
+  `.rnx.Z` and `.crx.Z` inputs. ZIP archives must contain one file so that
+  separate observations cannot be concatenated. Route Hatanaka data through
+  `crx2rnx` after decoding the outer compression layer. Existing long bzip2
+  suffixes also select the proper decoder and retain their original extension.
+  A failed decompressor or empty output stops the reader.
+- Adapt `cc20859` for station-info imports. Preserve each record's source
+  station code until the requested station has been selected. Supplying the
+  target station to the fork's parser would override that identity.
+- Take the scalar `LocateRinex --solve_troposphere` argument fix from
+  `9eee785`. The default GPSPACE mode remains 105.
+
+Offline regressions exercise compressed input through the reader's header
+boundary, multi-station station-info filtering, and explicit and default PPP
+CLI arguments. On Gauss, compressed variants of NTUS RINEX 3 and DAEJ RINEX 2
+observations produced byte-identical results to independent decompression with
+the local GAMIT Hatanaka tool. This comparison ended before GFZRNX and GPSPACE.
