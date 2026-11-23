@@ -130,8 +130,13 @@ class StationInfoRecord:
     # Format: (field_name, start_pos, end_pos)
     # Positions calculated from fieldwidths: (1, 6, 18, 19, 19, 9, 7, 9, 9, 22, 22, 7, 22, 17, 7, 20, 8, 100)
     # Note: Python slicing is [start:end) - end is exclusive
+    _STATION_CODE_COLUMNS = slice(1, 7)
     _FIELD_SPEC = (
-        ("StationCode", 1, 7),  #  6 chars: positions 1-6
+        (
+            "StationCode",
+            _STATION_CODE_COLUMNS.start,
+            _STATION_CODE_COLUMNS.stop,
+        ),  #  6 chars: positions 1-6
         ("StationName", 7, 25),  # 18 chars: positions 7-24
         ("DateStart", 25, 44),  # 19 chars: positions 25-43
         ("DateEnd", 44, 63),  # 19 chars: positions 44-62
@@ -618,7 +623,8 @@ class StationInfo:
 
     def parse_station_info(self, stninfo_file_list) -> List[StationInfoRecord]:
         """
-        Parse station information from file or list.
+        Parse station information from file or list. A bound station selects
+        only rows whose source station code matches, ignoring case.
 
         Args:
             stninfo_file_list: File path or list of station info records
@@ -639,7 +645,14 @@ class StationInfo:
                 stninfo = file_readlines(stninfo_file_list)
 
         records = []
+        target = self.StationCode.casefold() if self.StationCode else None
         for line in stninfo:
+            if target and (
+                not line
+                or line[StationInfoRecord._STATION_CODE_COLUMNS].strip().casefold()
+                != target
+            ):
+                continue
             record = StationInfoRecord.from_string(
                 line, self.NetworkCode, self.StationCode
             )

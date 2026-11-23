@@ -131,14 +131,15 @@ The fork's `main` fast-forwarded 51 commits from `643cb77` to upstream
   `crx2rnx` after decoding the outer compression layer. Existing long bzip2
   suffixes also select the proper decoder and retain their original extension.
   A failed decompressor or empty output stops the reader.
-- Adapt `cc20859` for station-info imports. Preserve each record's source
-  station code until the requested station has been selected. Supplying the
-  target station to the fork's parser would override that identity. The fixed-width file filter arrived upstream in the larger
-  metadata-sync change `8a0fd96` (May 21) that was not merged into `dev`. At
-  `fb5bdf8`, upstream prefilters fixed-width file input by station but skips
-  that filter for lists of records (including standard input). With a mixed
-  ABCD/IGM1 fixture targeting IGM1, upstream submitted both rows as IGM1
-  from standard input. The fork selected only IGM1 for both input forms.
+- Adapt `cc20859` for station-info imports. Upstream introduced its fixed-width
+  file filter in the larger metadata-sync change `8a0fd96` (May 21), which was
+  not merged into `dev`. At `fb5bdf8`, a mixed ABCD/IGM1 file targeting IGM1
+  selected only IGM1 upstream, but the same rows supplied on standard input
+  were both submitted as IGM1. The fork initially filtered by source station
+  only in ScanArchive. Its shared parser now checks the source station field
+  before assigning the requested station to a record. This covers fixed-width
+  files and lists (including standard input), the web upload, and PlotETM's
+  KML station metadata. Parsing without a target still returns all stations.
 - Take the scalar `LocateRinex --solve_troposphere` argument fix from
   `9eee785`. The default GPSPACE mode remains 105.
 

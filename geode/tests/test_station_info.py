@@ -457,6 +457,47 @@ def test_gamit_export_transliterates_text_without_changing_metadata():
     assert "StationName" not in record.to_database_dict()
 
 
+@pytest.mark.parametrize("as_file", [False, True], ids=["list", "file"])
+def test_bound_parser_selects_source_before_parsing_other_fields(as_file, tmp_path):
+    line = TestStationInfoRecordParsing.STN_LIST_WITH_DAZ[0]
+    foreign = line.replace(" IGM1 ", " ABCD ", 1)
+    malformed_foreign = foreign[:25] + "bad date".ljust(19) + foreign[44:]
+    lines = [malformed_foreign, foreign, line.replace("IGM1", "iGm1", 1)]
+    source = lines
+    if as_file:
+        source = tmp_path / "mixed.info"
+        source.write_text("\n".join(lines))
+
+    records = StationInfo(NetworkCode="tst", StationCode="igm1").parse_station_info(
+        source
+    )
+    assert [(r.NetworkCode, r.StationCode) for r in records] == [("tst", "igm1")]
+    assert [r.StationCode for r in StationInfo().parse_station_info(lines[1:])] == [
+        "abcd",
+        "igm1",
+    ]
+    assert StationInfoRecord.from_string(foreign, "tst", "igm1").StationCode == "igm1"
+
+
+def test_kml_placemark_selects_its_station_metadata(monkeypatch, tmp_path):
+    from com import PlotETM
+
+    kml = tmp_path / "stations.kml"
+    kml.write_text(
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Placemark><name>tst.igm1</name>'
+        "<Point><coordinates>10,20,0</coordinates></Point></Placemark></kml>"
+    )
+    line = TestStationInfoRecordParsing.STN_LIST_WITH_DAZ[0]
+    metadata = tmp_path / "tst.igm1.info"
+    metadata.write_text("\n".join([line.replace(" IGM1 ", " ABCD ", 1), line]))
+    monkeypatch.setattr(PlotETM, "get_country_code", lambda lat, lon: "USA")
+    stations = PlotETM.read_kml_or_kmz(
+        None, str(kml), str(tmp_path / "{net}.{stn}.info"), 6, None, None
+    )
+    records = stations[0]["station_meta"]["station_information"]
+    assert [(r["NetworkCode"], r["StationCode"]) for r in records] == [("tst", "igm1")]
+
+
 def test_archive_import_selects_station_from_source_records(monkeypatch):
     from com import ScanArchive
 

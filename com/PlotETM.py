@@ -574,11 +574,10 @@ def read_kml_or_kmz(
             stn = StationInfo(
                 cnn=None, NetworkCode=network_code, StationCode=station_code
             )
-            stninfo = [
-                item.to_json()
-                for item in stn.parse_station_info(metadata)
-                if item.StationCode == station_code
-            ]
+            metadata_path = metadata.replace("{net}", network_code).replace(
+                "{stn}", station_code
+            )
+            stninfo = [item.to_json() for item in stn.parse_station_info(metadata_path)]
         else:
             stninfo = []
 

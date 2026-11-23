@@ -517,8 +517,9 @@ def insert_stninfo(NetworkCode, StationCode, stninfofile):
         )
 
     try:
-        # Keep station codes from the file until we select the requested station.
-        stnInfo = station_info.StationInfo(NetworkCode=NetworkCode)
+        stnInfo = station_info.StationInfo(
+            NetworkCode=NetworkCode, StationCode=StationCode
+        )
         stninfo = stnInfo.parse_station_info(stninfofile)
 
     except station_info.StationInfoException:
@@ -538,27 +539,26 @@ def insert_stninfo(NetworkCode, StationCode, stninfofile):
 
     # ready to insert stuff to station info table
     for stn in stninfo:
-        if stn["StationCode"].lower() == StationCode:
-            try:
-                # call station info again in case there was a change from other records
-                stnobj = station_info.StationInfo(
-                    cnn, NetworkCode, StationCode, allow_empty=True
-                )
-                stnobj.insert_station_info(stn)
-            except station_info.StationInfoException as e:
-                errors.append(str(e))
+        try:
+            # call station info again in case there was a change from other records
+            stnobj = station_info.StationInfo(
+                cnn, NetworkCode, StationCode, allow_empty=True
+            )
+            stnobj.insert_station_info(stn)
+        except station_info.StationInfoException as e:
+            errors.append(str(e))
 
-            except:
-                errors.append(
-                    traceback.format_exc()
-                    + " insert_stninfo: "
-                    + NetworkCode
-                    + " "
-                    + StationCode
-                    + " using node "
-                    + platform.node()
-                )
-                continue
+        except:
+            errors.append(
+                traceback.format_exc()
+                + " insert_stninfo: "
+                + NetworkCode
+                + " "
+                + StationCode
+                + " using node "
+                + platform.node()
+            )
+            continue
 
     if errors:
         return "\n\n".join(errors)

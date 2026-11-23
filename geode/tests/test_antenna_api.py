@@ -101,6 +101,53 @@ def test_completion_plot_needs_only_database_read_access(api_db, monkeypatch, tm
     assert response.data["completion_plot"].startswith("iVBOR")  # Base64 PNG
 
 
+def test_station_file_upload_keeps_only_the_selected_station(
+    api_db, tmp_path, monkeypatch
+):
+    from api import views
+    from api.models import Stationinfo, Stations
+    from django.core.files.storage import FileSystemStorage
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from rest_framework.test import APIRequestFactory
+
+    from geode.metadata.station_info import StationInfoRecord
+    from geode.pyDate import Date
+
+    monkeypatch.setattr(views, "default_storage", FileSystemStorage(location=tmp_path))
+    record = StationInfoRecord(
+        StationCode="test",
+        ReceiverCode="RECEIVER",
+        ReceiverSerial="right",
+        ReceiverFirmware="1.0",
+        ReceiverVers="1.0",
+        AntennaCode="TEST",
+        AntennaSerial="A1",
+        RadomeCode="NONE",
+        HeightCode="DHARP",
+        DateStart=Date(year=2020, doy=1),
+        DateEnd=Date(year=2021, doy=1),
+    )
+    matching = str(record)
+    foreign = matching.replace(" TEST ", " ELSE ", 1).replace("right", "wrong")
+    upload = SimpleUploadedFile("mixed.info", (foreign + "\n" + matching).encode())
+    station = Stations.objects.get(station_code="test")
+    request = APIRequestFactory().post("/", {"file": upload}, format="multipart")
+    view = views.InsertStationInfoByFile.as_view(
+        authentication_classes=[], permission_classes=[]
+    )
+    response = view(request, station_api_id=station.pk)
+
+    assert response.status_code == 201, response.data
+    assert "error_message" not in response.data, response.data
+    inserted = response.data["inserted_station_info"]
+    assert [(r["network_code"], r["station_code"]) for r in inserted] == [
+        ("tst", "test")
+    ]
+    assert list(Stationinfo.objects.values_list("receiver_serial", flat=True)) == [
+        "right"
+    ]
+
+
 def test_station_serializer_create_and_partial_updates(api_db):
     from api.serializers import StationinfoSerializer
 
