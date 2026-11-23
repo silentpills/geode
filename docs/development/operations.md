@@ -8,7 +8,10 @@ This fork does not publish packages or create automated releases.
 
 ## Bundled database backup and restore rehearsal
 
-Pause application writers while taking a matching database/media snapshot:
+For a processing installation, pause CLI submissions and scheduled commands first.
+Let scientific workers finish, check the job receipts, and stop the worker
+processes before taking matching database, media, archive and solution snapshots.
+Then pause the web services:
 
 ```bash
 umask 077
@@ -37,6 +40,9 @@ tar -C var/media-restore-check -xzf backups/media.tar.gz
 Use a different new database name for another rehearsal. The API and migration
 tests exercise this `pg_dump`/`pg_restore` round trip on an isolated PostgreSQL
 cluster. For an external server, use its equivalent client tools and credentials.
+Bring up a restored processing installation with an empty, isolated compute
+queue. Reconcile queued or running receipts with the restored files before
+submitting work. Retain the original broker volume for investigation.
 A real recovery also restores media, points the application at the restored
 database, runs migrations for the chosen checkout, and verifies login and station
 metadata before resuming writers.
@@ -90,3 +96,18 @@ fails on vulnerabilities or an empty dependency selection. Conda native packages
 are outside that audit; the Docker workflow also reports image vulnerabilities
 with Trivy. Frontend security advisories require reviewing the npm dependency
 tree; do not apply `npm audit fix --force` without checking compatibility.
+
+## Interrupted scientific processing
+
+Use `pixi run --locked compute:status JOB_UUID` before resubmitting a job.
+A worker that disappears during an external program may leave a running receipt.
+Check the process, station/day files and database records together.
+
+For GAMIT, normal targeted rebuilds use a sibling `.<session>-attempt-*`
+directory. A failed or dry attempt can be inspected there while the previous
+published subnet remains available. If an old subnet directory has no matching
+statistics, archive that subnet directory separately before retrying. If
+statistics exist without the corresponding files, or a `.previous` tree or
+`.geode-publish-pending` marker remains, reconcile the database and the files
+from the same completed attempt. The project/day purge is an explicit fresh
+start and can remove other subnets for that day.

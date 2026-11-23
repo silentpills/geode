@@ -14,6 +14,9 @@ Soup Sieve 4.1.3, and yarl 1.25.1. These were the only eight changed runtime
 packages. On November 23, `pip-audit` reported zero known vulnerabilities
 across all 92 external PyPI packages in the new Linux runtime lock. The same
 audit had returned 42 advisory records across six packages before the updates.
+Retiring Dispy subsequently removed Dispy, Pycos and legacy-cgi; the repeated
+Linux runtime audit found zero known advisories across the remaining 89 packages.
+The frontend audit still counted 32 affected entries (27 with dev dependencies omitted).
 Conda libraries, container images, frontend packages, stored HTML, and SFTP
 server-key verification have separate review work remaining.
 

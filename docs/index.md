@@ -6,7 +6,7 @@ Developed by [Demian Gomez](https://github.com/demiangomez) and contributors, Ge
 
 ## Key Features
 
-- **Parallel Execution**: Run GAMIT processing tasks concurrently to maximize computational throughput using [dispy](https://github.com/pgiri/dispy).
+- **Parallel Execution**: Run GAMIT processing tasks concurrently to maximize computational throughput using [Celery workers](installation/cli-tools.md#scientific-workers).
 - **Database Integration**: Store and manage data in PostgreSQL for enhanced accessibility and organization. The relational database guarantees data consistency and can handle very large datasets (tested with ~14M station-days).
 - **Data Preparation**: Efficiently prepare data for parallel processing with GAMIT/GLOBK. The web interface and REST-API allow easy visualization of data and metadata.
 - **Error Handling and Monitoring**: Built-in tools for error detection and log management.

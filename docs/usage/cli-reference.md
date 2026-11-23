@@ -103,7 +103,7 @@ within the selected observations and reject an empty observation window.
 
 ### Parallel plotting
 
-`pixi run python -m com.PlotETM net.station --parallel` enables Dispy processing.
+`pixi run python -m com.PlotETM net.station --parallel` submits work to the [scientific worker](../installation/cli-tools.md#scientific-workers). This command uses the CLI flag to select parallel execution.
 Without this flag, plotting runs serially. Parallel workers still need the GNSS
 configuration, dependencies, and database access described in the CLI setup guide.
 

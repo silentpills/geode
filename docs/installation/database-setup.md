@@ -54,6 +54,11 @@ installations no longer receive them. If adopting an older installation, review
 disable unused accounts or change their passwords before serving the application.
 Existing users and custom passwords are preserved by this update.
 
+The migration owner also owns the `geode_compute` schema. The native processing
+coordinator and scientific workers use this schema to record jobs and protect
+campaign writes. The Compose web login only receives access to the public
+application tables. The backup guide restores both schemas as the owner.
+
 ## Connection settings
 
 | Setting | Used by |

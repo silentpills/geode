@@ -32,7 +32,7 @@ format_scripts_path = /path/to/format_scripts
 ionex = /path/to/orbits/ionex/$year
 brdc = /path/to/orbits/brdc/$year
 sp3 = /path/to/orbits/sp3/$gpsweek
-node_list = node1,node2,node3
+parallel = False
 sp3_ac = COD,IGS
 sp3_cs = OPS,R03,MGX
 sp3_st = FIN,SNX,RAP
@@ -46,7 +46,7 @@ sp3_st = FIN,SNX,RAP
 | `ionex` | IONEX files path (supports variables) | Yes |
 | `brdc` | Broadcast orbits path (supports variables) | Yes |
 | `sp3` | SP3 orbits path (supports variables) | Yes |
-| `node_list` | Comma-separated Dispy node addresses for parallel processing | No |
+| `parallel` | `True` submits processing to the Celery worker, `False` runs locally. | No |
 | `sp3_ac` | Analysis center precedence | No |
 | `sp3_cs` | Campaign code precedence | No |
 | `sp3_st` | Solution type precedence | No |

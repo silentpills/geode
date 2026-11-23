@@ -44,6 +44,9 @@ The API suite tests
 empty and existing schemas, repeated migrations, model/migration consistency,
 explicit administrator creation, readiness, backup/restore, antenna metadata,
 and the historical Django suite. It does not connect to your configured database.
+The worker integration test runs in `web` with `GEODE_TEST_REDIS_URL` set to
+an isolated disposable Redis database. CI supplies that broker. The test
+runs the station processing CLI on both a serial runner and a Celery worker.
 Run these database tests as an unprivileged user because PostgreSQL refuses to
 initialize a server as root.
 

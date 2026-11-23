@@ -19,7 +19,7 @@ fork has no PyPI publication or release automation.
 
 - Download, validate, and archive RINEX observations using station identity and
   coordinate checks.
-- Run PPP and GAMIT/GLOBK processing with external geodetic tools and Dispy workers.
+- Run PPP and GAMIT/GLOBK processing with external geodetic tools and [Celery workers](docs/installation/cli-tools.md#scientific-workers).
 - Manage equipment history, antenna/radome combinations, site visits, and data gaps.
 - Fit and plot Extended Trajectory Models, stack solutions, and export station
   reports and campaign-planning products.

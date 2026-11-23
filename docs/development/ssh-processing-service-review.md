@@ -146,7 +146,7 @@ also means adopting it would not remove pickle from the underlying machinery.
 
 **Modernize the execution boundary, then the old scheduler.**
 
-GeoDE currently uses Dispy for computation and separately uses pickle to save
+At the September 2026 review revision, GeoDE used Dispy for computation and separately uses pickle to save
 interactive ETM stacker sessions. These are different responsibilities. The old
 [Celery proposal](https://github.com/silentpills/geode/blob/2641b0bd2ebee61114531a4f1033c4540b60362b/CeleryMigrationPlan.md) explicitly retains pickle and
 arbitrary function dispatch. For a service, use named operations with versioned

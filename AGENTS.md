@@ -10,7 +10,7 @@ Delegate independent work to subagents when it improves speed or quality.
 
 ## Orientation
 
-- `geode/`: processing, archive/database access, ETM fitting, and Dispy jobs.
+- `geode/`: processing, archive/database access, ETM fitting, and Celery processing jobs.
 - `com/`: command-line entry points; `geode/tests/`: processing and API tests.
 - `web/backend/`: Django models, API, management commands, and migrations.
 - `web/frontend/`: React/TypeScript application.
@@ -18,8 +18,8 @@ Delegate independent work to subagents when it improves speed or quality.
   MkDocs. Start with [development](docs/development/contributing.md) and the
   [upstream integration record](docs/development/upstream-integration.md).
 
-The processing backend still uses Dispy. `CeleryMigrationPlan.md` is a proposal,
-not implemented architecture or a standing instruction to migrate it.
+Processing uses the serial runner or the Celery compute queue. See
+[CLI setup](docs/installation/cli-tools.md) for worker setup and recovery.
 
 ## Environments and verification
 

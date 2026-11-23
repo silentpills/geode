@@ -97,3 +97,13 @@ frontend build; rebuild after changing it.
 
 See [operations](../development/operations.md) for backups, restore rehearsal,
 and updates. Keep `.env` and uploaded media outside Git.
+
+## Private documentation site
+
+Build the manual with `pixi run --locked -e docs docs:build --strict` and serve
+the generated `site/` directory as static files. For a tailnet-only hostname
+such as `geodedocs.silentpills.com`, point split DNS at the private HTTPS proxy
+and restrict the listener and Tailscale access rules to the intended clients.
+This needs no Django service or application login. Publish only the generated
+site directory. Verify access from an allowed device and from outside the
+tailnet before relying on the deployment boundary.

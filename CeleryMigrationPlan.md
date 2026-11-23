@@ -1,9 +1,10 @@
 # Celery Migration Plan: Replace dispy with Celery for Distributed Computing
 
-**February 2026 proposal.** GNSS processing still uses Dispy. The web
-application already uses Celery and Redis for station gap updates. The later
-[processing service review](docs/development/ssh-processing-service-review.md)
-reconsiders the pickle-based job arguments proposed below.
+**Historical proposal, February 2026.** For the implemented configuration, see
+[scientific workers](docs/installation/cli-tools.md#scientific-workers).
+The implementation uses JSON messages and PostgreSQL execution receipts.
+The pickle transport, remote software distribution, and cloud provisioning
+described below were proposals.
 
 ## Context
 
