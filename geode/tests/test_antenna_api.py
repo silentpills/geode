@@ -113,7 +113,8 @@ def test_station_file_upload_keeps_only_the_selected_station(
     from geode.metadata.station_info import StationInfoRecord
     from geode.pyDate import Date
 
-    monkeypatch.setattr(views, "default_storage", FileSystemStorage(location=tmp_path))
+    uploads = tmp_path / "uploads"
+    monkeypatch.setattr(views, "default_storage", FileSystemStorage(location=uploads))
     record = StationInfoRecord(
         StationCode="test",
         ReceiverCode="RECEIVER",
@@ -146,6 +147,16 @@ def test_station_file_upload_keeps_only_the_selected_station(
     assert list(Stationinfo.objects.values_list("receiver_serial", flat=True)) == [
         "right"
     ]
+    foreign_upload = SimpleUploadedFile("other.info", foreign.encode())
+    request = APIRequestFactory().post(
+        "/", {"file": foreign_upload}, format="multipart"
+    )
+    response = view(request, station_api_id=station.pk)
+    assert response.status_code == 400
+    assert response.data["inserted_station_info"] == []
+    assert "matched station test" in str(response.data["error_message"])
+    assert Stationinfo.objects.count() == 1
+    assert not list(uploads.iterdir())
 
 
 def test_station_serializer_create_and_partial_updates(api_db):

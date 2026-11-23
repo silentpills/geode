@@ -2182,6 +2182,10 @@ class InsertStationInfoByFile(APIView):
             station_info_records = pgamit_stationinfo.parse_station_info(
                 full_file_path)
 
+            if not station_info_records:
+                raise exceptions.CustomValidationErrorExceptionHandler(
+                    f"No station.info records matched station {station.station_code}.")
+
             for station_info_record in station_info_records:
                 station_info_serializer = self._station_info_pgamit_to_serializer(
                     station_info_record)

@@ -89,6 +89,10 @@ Track equipment configurations including receivers, antennas, and operational da
 
 Use the pencil icon to modify existing entries or the Add button for new records.
 
+When you upload a station.info file for a station, GeoDE imports rows whose
+four-character code matches that station. A file with no matching records
+returns a validation error and creates no equipment history.
+
 ![Edit Equipment](https://github.com/user-attachments/assets/5eddbaf3-0145-4976-8150-87897b8ff25c)
 
 ---
