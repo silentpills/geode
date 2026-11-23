@@ -9,6 +9,7 @@ import pytest
 from geode.etm.core.data_classes import Earthquake
 from geode.etm.core.etm_config import EtmConfig
 from geode.etm.core.etm_engine import EtmEngine
+from geode.etm.core.etm_stacker_vce import EtmStackerVCEEnhanced
 from geode.etm.core.type_declarations import SolutionType
 from geode.etm.stacker.constraints import (
     CoseismicConstraint,
@@ -120,6 +121,57 @@ def test_session_restores_fitted_observations_weights_and_stack_solution(
         assert session._extract_results() == stacker._extract_results()
 
 
+@pytest.mark.parametrize("weights", ["constraints", "observations", "stations"])
+def test_variance_estimation_solves_with_the_applied_weights(tmp_path, weights):
+    stacker = fitted_stacker(tmp_path)
+    stacker.solve(interpolate_fields=False)
+    vce = EtmStackerVCEEnhanced(stacker, max_iterations=1)
+    if weights == "constraints":
+        result = vce.run_vce()
+    else:
+        result = vce.run_vce_with_observation_scaling(
+            initial_obs_variance=4, scale_per_station=(weights == "stations")
+        )
+    assert stacker.solved
+    assert result is vce.history[-1]
+    if weights != "constraints":
+        assert stacker.normal_equations[0].weight_scale == 0.25
+    stacker.solve(interpolate_fields=False)
+    assert result.global_variance == stacker.variance
+    np.testing.assert_array_equal(result.solution, stacker.solution)
+
+
+def test_version_one_session_retains_inputs_but_requires_new_solve(tmp_path):
+    stacker = fitted_stacker(tmp_path)
+    stacker.solve(interpolate_fields=False)
+    old_solution = stacker.solution
+    old_covariance = stacker.covariance
+    stacker.change_station_weight("test.abcd", 3)
+    # Reproduce the old writer's inconsistent state.
+    stacker.solved = True
+    stacker.solution = old_solution
+    stacker.covariance = old_covariance
+    source = save_session(stacker, tmp_path / "cache")
+    old_file = tmp_path / "v1.etms"
+    with zipfile.ZipFile(source) as current, zipfile.ZipFile(old_file, "w") as old:
+        for name in current.namelist():
+            payload = current.read(name)
+            if name == "session.json":
+                manifest = json.loads(payload)
+                manifest["version"] = 1
+                payload = json.dumps(manifest)
+            old.writestr(name, payload)
+
+    with pytest.warns(UserWarning, match="Run solve"):
+        restored = load_session(old_file)
+    assert not restored.solved
+    assert not restored.solution.size and not restored.covariance.size
+    assert restored.normal_equations[0].weight_scale == 3
+    restored.solve(interpolate_fields=False)
+    stacker.solve(interpolate_fields=False)
+    np.testing.assert_array_equal(stacker.covariance, restored.covariance)
+
+
 def test_earthquake_mask_and_event_references_survive(tmp_path):
     class Catalog:
         def get(self, *_):
@@ -195,17 +247,42 @@ def test_shell_round_trip_without_processing_database(tmp_path):
     import sys
     from pathlib import Path
 
-    name = save_session(fitted_stacker(tmp_path), tmp_path / "native")
+    original = fitted_stacker(tmp_path)
+    original.solve(interpolate_fields=False)
+    original.fields.append(EtmStackerField(ConstraintType.INTERSEISMIC, original.grids))
+    name = save_session(original, tmp_path / "native")
     env_python = Path(sys.executable)
     run = subprocess.run(
         [str(env_python), "-m", "com.EtmStacker", "--load_from_file", str(name)],
         cwd=tmp_path,
-        input="history\nload native.etms\nsave copy\nquit\n",
+        input=(
+            "load native.etms\nreweight_station TEST.ABCD 3\n"
+            "print vel\nexport interseismic\nsave dirty\nload dirty\n"
+            "list stations\nsolve false\nprint vel\nsave copy\nquit\n"
+        ),
         text=True,
         capture_output=True,
         timeout=30,
     )
     assert run.returncode == 0, run.stderr
     assert "Saved to copy.etms" in run.stdout
-    assert load_session(tmp_path / "copy").command_history[-1] == "save copy"
+    assert "System is not solved" in run.stdout
+    assert "test.abcd weight 3" in run.stdout
+    assert "constrained" in run.stdout
+    dirty = load_session(tmp_path / "dirty")
+    assert not dirty.solved
+    assert dirty.normal_equations[0].weight_scale == 3
+    assert not dirty.solution.size and not dirty.covariance.size
+    assert dirty.fields == []
+    assert dirty.stations[0].etm_constraints is None
+    assert dirty.stations[0].posterior_wrms is None
+    assert not (tmp_path / "export_interseismic.txt").exists()
+
+    reopened = load_session(tmp_path / "copy")
+    assert reopened.command_history[-1] == "save copy"
+    assert reopened.solved
+    original.change_station_weight("test.abcd", 3)
+    original.solve(interpolate_fields=False)
+    np.testing.assert_array_equal(reopened.solution, original.solution)
+    np.testing.assert_array_equal(reopened.covariance, original.covariance)
     assert not (tmp_path / "gnss_data.cfg").exists()

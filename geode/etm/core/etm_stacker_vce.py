@@ -113,9 +113,7 @@ class EtmStackerVCE:
             self._apply_variance_factors_as_weights(variance_factors)
 
             # Solve system with current weights
-            # if system is already solved, don't solve again, just compute residuals
-            if iteration == 0 and self.stacker.solved:
-                self.stacker.solve(interpolate_fields=False)
+            self.stacker.solve(interpolate_fields=False)
 
             # Compute residuals for each group
             residual_groups = self._compute_residual_groups()
@@ -667,15 +665,9 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
         for iteration in range(self.max_iterations):
             tqdm.write(f"\n--- VCE Iteration {iteration + 1} ---")
 
-            if iteration > 0 or not self.stacker.solved:
-                # if system is already solved, don't solve again, just compute residuals
-                # 1. Scale observation weights by observation variance factor
-                self._apply_observation_variance(obs_variance)
-                # 2. Apply constraint weights
-                self._apply_variance_factors_as_weights(variance_factors)
-
-                # 3. Solve
-                self.stacker.solve(interpolate_fields=False)
+            self._apply_observation_variance(obs_variance)
+            self._apply_variance_factors_as_weights(variance_factors)
+            self.stacker.solve(interpolate_fields=False)
 
             # 4. Compute residual groups
             residual_groups = self._compute_residual_groups()
@@ -827,15 +819,6 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
         tqdm.write("WARNING: This estimates variance for EACH station separately")
         tqdm.write("         Only use if station quality varies significantly\n")
 
-        # Store original weights
-        original_weights = {}
-        for stn in self.stacker.stations:
-            neq = stn.normal_equations
-            original_weights[neq.station] = {
-                "observation_weights": [ow.copy() for ow in neq.observation_weights],
-                "weight_scale": neq.weight_scale,
-            }
-
         # Initialize: one variance per station
         station_variances = {
             neq.station: initial_obs_variance for neq in self.stacker.normal_equations
@@ -848,40 +831,20 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
             tqdm.write(f"\n--- VCE Iteration {iteration + 1} ---")
 
             # 1. Apply per-station observation variances
-            for stn in self.stacker.stations:
-                neq = stn.normal_equations
-                station_id = neq.station
-                obs_var = station_variances[station_id]
-
-                # Scale this station's weights
-                orig = original_weights[station_id]
-                scale_factor = 1.0 / obs_var
-
-                for i in range(3):
-                    neq.observation_weights[i] = (
-                        orig["observation_weights"][i] * scale_factor
-                    )
-                    p_scaled = np.diag(neq.observation_weights[i])
-                    neq.neq[i] = neq.design_matrix.T @ p_scaled @ neq.design_matrix
-                    neq.ceq[i] = (
-                        neq.design_matrix.T @ p_scaled @ neq.observation_vector[i]
-                    )
-                    neq.weighted_observations[i] = (
-                        neq.observation_vector[i].T
-                        @ p_scaled
-                        @ neq.observation_vector[i]
-                    )
+            for station_id, obs_variance in station_variances.items():
+                self.stacker.change_station_weight(
+                    station_id, 1.0 / obs_variance, silent=True
+                )
 
             # 2. Apply constraint weights
             self._apply_variance_factors_as_weights(variance_factors)
 
             # 3. Solve
-            # if system is already solved, don't solve again, just compute residuals
-            if iteration == 0 and self.stacker.solved:
-                self.stacker.solve(interpolate_fields=False)
+            self.stacker.solve(interpolate_fields=False)
 
             # 4. Compute residuals PER STATION
             station_variances_new = {}
+            components = {}
 
             for stn in self.stacker.stations:
                 neq = stn.normal_equations
@@ -892,7 +855,9 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
                 for i in range(3):
                     x = self.stacker.solution[i, neq.parameter_range]
                     v = neq.observation_vector[i] - neq.design_matrix @ x
-                    chi2_component = v.T @ np.diag(neq.observation_weights[i]) @ v
+                    chi2_component = (
+                        v.T @ np.diag(neq.observation_weights[i]) @ v
+                    ) * neq.weight_scale
                     # Handle 0-d array from quadratic form
                     if isinstance(chi2_component, np.ndarray):
                         chi2_component = chi2_component.item()
@@ -905,6 +870,14 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
                     station_variances_new[station_id] = chi2 / redundancy
                 else:
                     station_variances_new[station_id] = station_variances[station_id]
+
+                components[station_id] = VarianceComponent(
+                    station_id,
+                    station_variances_new[station_id],
+                    redundancy,
+                    chi2,
+                    3 * neq.equation_count,
+                )
 
             # 5. Constraint variances (same as before)
             residual_groups = self._compute_residual_groups()
@@ -919,6 +892,14 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
                     variance_factors_new[group_name] = chi2 / redundancy
                 else:
                     variance_factors_new[group_name] = 1.0
+
+                components[group_name] = VarianceComponent(
+                    group_name,
+                    variance_factors_new[group_name],
+                    redundancy,
+                    chi2,
+                    residual_info["n_equations"],
+                )
 
             # Print summary (top 10 stations by variance)
             from operator import itemgetter
@@ -953,6 +934,18 @@ class EtmStackerVCEEnhanced(EtmStackerVCE):
 
             tqdm.write(f"\n     Max change: {max_change:.6f}")
             tqdm.write(f"  Global variance: {self.stacker.variance:.6f}")
+
+            self.history.append(
+                VCEResults(
+                    iteration=iteration + 1,
+                    components=components,
+                    solution=self.stacker.solution.copy(),
+                    covariance=None,
+                    global_variance=self.stacker.variance,
+                    converged=converged,
+                    max_change=max_change,
+                )
+            )
 
             if converged:
                 tqdm.write(

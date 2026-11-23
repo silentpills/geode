@@ -30,6 +30,7 @@ import argparse
 import cmd
 import logging
 import os.path
+import re
 import readline
 import time
 from datetime import datetime
@@ -80,11 +81,6 @@ class EtmStackerShell(cmd.Cmd):
 
         # Restore command history from the saved session
         self._restore_history()
-
-        self.velocities = None
-        self.postseismic = None
-        if etm_stacker.solved:
-            self.velocities, self.postseismic = etm_stacker._extract_results()
 
         # Write session header
         with open(self.history_file, "a") as f:
@@ -146,13 +142,35 @@ class EtmStackerShell(cmd.Cmd):
         syntax: reweight_station <net.stn> [<net.stn> ...] <value>
         """
         try:
-            values = arg.split()
-            stnlist = process_stnlist(self.cnn, arg.split()[0:-1])
-            value = values[-1]
-            for stn in stnlist:
-                self.etm_stacker.change_station_weight(stationID(stn), float(value))
-        except ValueError:
-            print("Usage: reweight_station <station_id> <value>")
+            *selectors, weight = arg.split()
+            if not selectors:
+                raise ValueError("Supply at least one station")
+            value = float(weight)
+            known = {
+                str(station).lower(): str(station)
+                for station in self.etm_stacker.stations
+            }
+            is_file = len(selectors) == 1 and os.path.isfile(selectors[0])
+            if not is_file and all(
+                re.fullmatch(r"[A-Za-z0-9]+\.[A-Za-z0-9]+", s) or s.lower() in known
+                for s in selectors
+            ):
+                missing = [s for s in selectors if s.lower() not in known]
+                if missing:
+                    raise ValueError(
+                        "Stations absent from session: " + ", ".join(missing)
+                    )
+                station_ids = [known[s.lower()] for s in selectors]
+            else:
+                station_ids = [
+                    stationID(stn) for stn in process_stnlist(self.cnn, selectors)
+                ]
+            for station_id in station_ids:
+                self.etm_stacker.change_station_weight(station_id, value)
+        except ValueError as exc:
+            print(
+                f"{exc}. Usage: reweight_station <station_id> [<station_id> ...] <value>"
+            )
 
     def do_save(self, arg):
         """
@@ -187,9 +205,6 @@ class EtmStackerShell(cmd.Cmd):
             return
         self.etm_stacker = loaded
         self._restore_history()
-        self.velocities = self.postseismic = None
-        if loaded.solved:
-            self.velocities, self.postseismic = loaded._extract_results()
 
     def do_quit(self, arg):
         """Exit the shell"""
@@ -433,7 +448,7 @@ class EtmStackerShell(cmd.Cmd):
 
         print("Re-solving...")
         tic = time.time()
-        self.velocities, self.postseismic = self.etm_stacker.solve()
+        self.etm_stacker.solve()
         print(f"Solved in {(time.time() - tic):.1f} sec")
 
     def do_okada_weights(self, arg):
@@ -477,7 +492,7 @@ class EtmStackerShell(cmd.Cmd):
 
         print(f"Updated {n} constraint(s). Re-solving...")
         tic = time.time()
-        self.velocities, self.postseismic = self.etm_stacker.solve()
+        self.etm_stacker.solve()
         toc = time.time()
         print(f"Solved in {(toc - tic):.1f} sec")
 
@@ -522,14 +537,17 @@ class EtmStackerShell(cmd.Cmd):
         elif arg == "config":
             self.etm_stacker.print_config()
 
-        elif arg == "vel" and self.velocities is not None:
-            header = list(self.velocities[0].keys())
+        elif arg == "vel":
+            velocities, _ = self.etm_stacker._extract_results()
+            if not velocities:
+                return
+            header = list(velocities[0].keys())
             print(
                 f"{header[0]:8s} {header[1]:15s} {header[2]:15s} {header[3]:27s} "
                 f"{header[4]:27s} {header[5]:15s}"
             )
 
-            for stn in self.velocities:
+            for stn in velocities:
                 name = stn["station"]
                 vc = stn["constrained"]
                 vp = stn["a_priori"]
@@ -908,11 +926,9 @@ class EtmStackerShell(cmd.Cmd):
         """
         tic = time.time()
         if arg.strip() == "":
-            self.velocities, self.postseismic = self.etm_stacker.solve()
+            self.etm_stacker.solve()
         else:
-            self.velocities, self.postseismic = self.etm_stacker.solve(
-                interpolate_fields=False
-            )
+            self.etm_stacker.solve(interpolate_fields=False)
         toc = time.time()
         print(f"Solved in {(toc - tic):.1f} sec")
 

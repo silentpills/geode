@@ -4,6 +4,7 @@ import json
 import math
 import os
 import tempfile
+import warnings
 import zipfile
 from dataclasses import fields
 from datetime import date, datetime
@@ -61,7 +62,7 @@ class SessionError(ValueError):
 
 
 _FORMAT = "geode-etm-stacker"
-_VERSION = 1
+_VERSION = 2
 _CONVENTIONS = {
     "station_fit_components": ["north", "east", "up"],
     "stack_solution_components": ["east", "north", "up"],
@@ -399,12 +400,26 @@ def load_session(name) -> EtmStacker:
             ):
                 raise SessionError("Invalid session archive members")
             manifest = json.loads(archive.read("session.json"))
-            if manifest["format"] != _FORMAT or manifest["version"] != _VERSION:
+            if manifest["format"] != _FORMAT or manifest["version"] not in (
+                1,
+                _VERSION,
+            ):
                 raise SessionError("Unsupported ETM session format or version")
             if manifest.get("conventions") != _CONVENTIONS:
                 raise SessionError("Unknown component order or units in session")
             stacker = _Reader(archive, manifest["records"]).decode(manifest["root"])
             _validate_stacker(stacker)
+            if manifest["version"] == 1:
+                # Older writers kept cached results after station weights changed.
+                # A file cannot tell us which weights produced its saved covariance.
+                if stacker.solved:
+                    warnings.warn(
+                        "Version 1 session loaded. Run solve to recompute the stack "
+                        "from its saved inputs and weights.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                stacker._invalidate_solution()
             stacker.filename = str(path.with_suffix(""))
             return stacker
     except SessionError:

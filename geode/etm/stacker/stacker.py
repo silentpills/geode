@@ -155,6 +155,7 @@ class EtmStacker:
         neq = self._create_normal_equations(station)
 
         # Store
+        self._invalidate_solution()
         self.stations.append(station)
         self.normal_equations.append(neq)
 
@@ -174,7 +175,7 @@ class EtmStacker:
 
         # no need to rebuild the registry or the grids
         # they will contain a couple dead sites but they don't affect the calculations
-        self.solved = False
+        self._invalidate_solution()
 
     def _build_etm(
         self,
@@ -734,6 +735,7 @@ class EtmStacker:
 
     def build_system(self):
         """Build the complete stacking system."""
+        self._invalidate_solution()
         # 1. Create grids
         self.grids = GridSystem.create_from_stations(
             self.stations,
@@ -746,33 +748,44 @@ class EtmStacker:
         # 3. Register all constraints
         self._register_constraints()
 
+    def _invalidate_solution(self):
+        """Discard results derived from the previous equations, retaining station fits."""
+        if not self.solved and not self.solution.size and not self.fields:
+            return
+        self.solved = False
+        self.solution = np.array([])
+        self.covariance = np.array([])
+        self.variance = 0.0
+        self.total_constraints = 0
+        self.fields.clear()
+        for station in self.stations:
+            station.posterior_wrms = None
+            station.etm_constraints = None
+
     def change_station_weight(self, station_id: str, new_weight: float, silent=False):
-        found = False
+        if not np.isfinite(new_weight) or new_weight <= 0:
+            raise ValueError("Station weight must be finite and positive")
         for neq in self.normal_equations:
-            if neq.station == station_id:
+            if neq.station == station_id and neq.weight_scale != new_weight:
                 if not silent:
                     tqdm.write(
-                        f"Found {station_id} with weight {neq.weight_scale}, "
-                        f"updating to {new_weight}"
+                        f"Updating {station_id} from weight {neq.weight_scale} to "
+                        f"{new_weight}. Invoke solve to update the results."
                     )
+                self._invalidate_solution()
                 for i in range(3):
                     neq.ceq[i] = neq.ceq[i] / neq.weight_scale * new_weight
                     neq.neq[i] = neq.neq[i] / neq.weight_scale * new_weight
                     neq.weighted_observations[i] = (
                         neq.weighted_observations[i] / neq.weight_scale * new_weight
                     )
-
                 neq.weight_scale = new_weight
-
-                found = True
-
-        if found and not silent:
-            tqdm.write("Do not forget to invoke solve again!")
 
     def solve(self, interpolate_fields=True) -> Tuple[List, List]:
         """
         Solve the stacking system.
         """
+        self._invalidate_solution()
         # rebuild normal equations before solving
         system_neq, system_ceq = self._build_base_normal_equations()
 
@@ -1082,8 +1095,6 @@ class EtmStacker:
 
             offset += n_params
 
-        self.solved = False
-
         return system_neq, system_ceq
 
     def add_earthquake(
@@ -1096,6 +1107,7 @@ class EtmStacker:
             tqdm.write(f"Event {event.id} is already in the list of modeled events")
             return
 
+        self._invalidate_solution()
         tqdm.write("Adding event " + str(event))
         self.earthquakes.append(event)
         self.config.earthquakes_cherry_picked.append(f"{event.id}")
@@ -1219,6 +1231,7 @@ class EtmStacker:
 
         # check the event is not already in the list
         if event in self.earthquakes:
+            self._invalidate_solution()
             tqdm.write("Removing event " + str(event))
 
             self.earthquakes.pop(self.earthquakes.index(event))
@@ -1359,9 +1372,16 @@ class EtmStacker:
                     apply_to += [constraint]
         else:
             # nothing given, apply to all
-            apply_to = self.constraint_registry.constraints.values()
+            apply_to = [
+                c
+                for group in self.constraint_registry.constraints.values()
+                for c in group
+            ]
 
-        # do the thing
+        if not apply_to:
+            tqdm.write("update_weights: no matching constraints found")
+            return
+        self._invalidate_solution()
         for constraint in apply_to:
             tqdm.write(
                 f"Updating sigma for {constraint.short_description()}: "
@@ -1369,11 +1389,6 @@ class EtmStacker:
                 f"v={constraint.v_sigma * 1000:.2f}mm -> {v_sigma * 1000:.2f}mm"
             )
             constraint.update_weights(h_sigma, v_sigma)
-
-        if not apply_to:
-            tqdm.write("update_weights: no matching constraints found")
-
-        self.solved = False
 
     def update_okada_weights(
         self,
@@ -1416,6 +1431,10 @@ class EtmStacker:
                 continue
             apply_to.append(constraint)
 
+        if not apply_to:
+            tqdm.write("update_okada_weights: no matching constraints found")
+            return 0
+        self._invalidate_solution()
         for constraint in apply_to:
             tqdm.write(
                 f"Updating Okada weights for {constraint.short_description()}: "
@@ -1426,10 +1445,6 @@ class EtmStacker:
             constraint.sw_okada_v_weight = v_weight
             constraint.dislocation_model = None
 
-        if not apply_to:
-            tqdm.write("update_okada_weights: no matching constraints found")
-
-        self.solved = False
         return len(apply_to)
 
     def plot_grid_result(self, sigmas=False):
