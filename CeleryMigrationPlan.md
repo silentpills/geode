@@ -1,5 +1,10 @@
 # Celery Migration Plan: Replace dispy with Celery for Distributed Computing
 
+**February 2026 proposal.** GNSS processing still uses Dispy. The web
+application already uses Celery and Redis for station gap updates. The later
+[processing service review](docs/development/ssh-processing-service-review.md)
+reconsiders the pickle-based job arguments proposed below.
+
 ## Context
 
 GeoDE uses **dispy** for distributed GNSS processing across compute nodes. dispy is

@@ -133,7 +133,11 @@ The fork's `main` fast-forwarded 51 commits from `643cb77` to upstream
   A failed decompressor or empty output stops the reader.
 - Adapt `cc20859` for station-info imports. Preserve each record's source
   station code until the requested station has been selected. Supplying the
-  target station to the fork's parser would override that identity.
+  target station to the fork's parser would override that identity. At
+  `fb5bdf8`, upstream prefilters fixed-width file input by station but skips
+  that filter for lists of records (including standard input). With a mixed
+  ABCD/IGM1 fixture targeting IGM1, upstream submitted both rows as IGM1
+  from standard input. The fork selected only IGM1 for both input forms.
 - Take the scalar `LocateRinex --solve_troposphere` argument fix from
   `9eee785`. The default GPSPACE mode remains 105.
 
