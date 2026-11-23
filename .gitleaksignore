@@ -1,3 +1,5 @@
 # The scanner matched the Django migration name 0035_antenna_radomes.
 055ab11f7632d4a3869de5c90b872df42ee0cd04:web/backend/api/migrations/0036_antenna_catalog_permissions.py:generic-api-key:24
 055ab11f7632d4a3869de5c90b872df42ee0cd04:geode/tests/test_antenna_api.py:generic-api-key:194
+# The dependency name 0039_compute_jobs in the private-schema migration.
+b3217c0da2a20f60ea5a2be83c9b0c5f3bce6128:web/backend/api/migrations/0040_private_compute.py:generic-api-key:9
