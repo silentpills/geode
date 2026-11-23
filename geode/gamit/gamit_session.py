@@ -4,11 +4,15 @@ Date: 4/3/17 6:57 PM
 Author: Demian D. Gomez
 """
 
+import fcntl
 import os
+import tempfile
+from pathlib import Path
 from shutil import copyfile, rmtree
 
 # deps
 import simplekml
+from psycopg import sql
 from tqdm import tqdm
 
 # app
@@ -25,6 +29,140 @@ class GamitSessionException(Exception):
         return repr(self.value)
 
 
+PRODUCT_KEYS = {
+    "gamit_stats": ("Project", "Year", "DOY", "subnet", "system"),
+    "gamit_subnets": ("Project", "Year", "DOY", "subnet"),
+    "gamit_ztd": ("NetworkCode", "StationCode", "Date", "Project", "Year", "DOY"),
+    "gamit_soln": ("NetworkCode", "StationCode", "Project", "Year", "DOY"),
+}
+
+
+def replace_product(cnn, table, scope, rows):
+    """Replace the selected rows atomically, keeping API IDs for retained primary keys."""
+    keys = PRODUCT_KEYS[table]
+    if not rows:
+        raise ValueError("Expected at least one processing result")
+    fields = list(rows[0])
+    if not set(keys).issubset(fields) or "api_id" in fields:
+        raise ValueError("Invalid primary key or API ID in processing product")
+    target = sql.Identifier("public", table)
+    temp_name = "incoming_" + table
+    staging = sql.Identifier(temp_name)
+    columns = sql.SQL(", ").join(map(sql.Identifier, fields))
+    key_columns = sql.SQL(", ").join(map(sql.Identifier, keys))
+    updates = sql.SQL(", ").join(
+        sql.SQL("{0} = excluded.{0}").format(sql.Identifier(f))
+        for f in fields
+        if f not in keys
+    )
+    matches = sql.SQL(" AND ").join(
+        sql.SQL("saved.{0} = incoming.{0}").format(sql.Identifier(k)) for k in keys
+    )
+    selected = sql.SQL(" AND ").join(
+        sql.SQL("saved.{} = %s").format(sql.Identifier(k)) for k in scope
+    )
+    with cnn.cnn.transaction():
+        cnn.cursor.execute(
+            sql.SQL(
+                "CREATE TEMP TABLE {} ON COMMIT DROP AS SELECT {} FROM {} WITH NO DATA"
+            ).format(staging, columns, target)
+        )
+        cnn.insert_many(temp_name, rows)
+        cnn.cursor.execute(
+            sql.SQL(
+                "INSERT INTO {} ({}) SELECT {} FROM {} "
+                "ON CONFLICT ({}) DO UPDATE SET {}"
+            ).format(target, columns, columns, staging, key_columns, updates)
+        )
+        cnn.cursor.execute(
+            sql.SQL(
+                "DELETE FROM {} AS saved WHERE {} AND NOT EXISTS "
+                "(SELECT 1 FROM {} AS incoming WHERE {})"
+            ).format(target, selected, staging, matches),
+            list(scope.values()),
+        )
+
+
+def replace_day(cnn, table, project, date, rows):
+    if table not in ("gamit_ztd", "gamit_soln") or not rows:
+        raise ValueError("Expected daily GLOBK coordinates or zenith delays")
+    replace_product(
+        cnn, table, {"Project": project, "Year": date.year, "DOY": date.doy}, rows
+    )
+
+
+def publish_directory(staged, destination, confirm=None):
+    """Install a complete staged tree, retaining the previous tree until it is replaced."""
+    # Rename within one filesystem. Keep the previous complete tree
+    # recoverable even if a worker is killed between the two renames.
+    previous = destination.with_name(f".{destination.name}.previous")
+    parent_fd = os.open(destination.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(parent_fd, fcntl.LOCK_EX)
+        if previous.exists():
+            raise FileExistsError(
+                f"Inspect unfinished publication at {previous} before retrying"
+            )
+        if destination.exists():
+            destination.rename(previous)
+        try:
+            staged.rename(destination)
+            if confirm is not None:
+                confirm()
+        except BaseException:
+            if not staged.exists() and destination.exists():
+                destination.rename(staged)
+            if previous.exists():
+                previous.rename(destination)
+            raise
+        if previous.exists():
+            rmtree(previous)
+    finally:
+        os.close(parent_fd)
+
+
+def completed_session(cnn, path, row_key):
+    """A missing completion record never authorizes deletion of an existing tree."""
+    destination = Path(path)
+    cnn.cursor.execute(
+        'SELECT EXISTS (SELECT 1 FROM gamit_stats WHERE "Year"=%s AND "DOY"=%s '
+        'AND "Project"=%s AND subnet=%s) AS ready',
+        (row_key["Year"], row_key["DOY"], row_key["Project"], row_key["subnet"]),
+    )
+    ready = cnn.cursor.fetchone()["ready"]
+    previous = destination.with_name(f".{destination.name}.previous")
+    pending = destination / ".geode-publish-pending"
+    if (
+        ready
+        and destination.is_dir()
+        and not previous.exists()
+        and not pending.exists()
+    ):
+        return True
+    if ready or destination.exists() or previous.exists():
+        raise GamitSessionException(
+            f"Incomplete publication or inconsistent completion record for {path}. "
+            "Inspect the job receipt, solution, and sibling .previous directory. "
+            "If no statistics exist, move only this session tree aside and retry. "
+            "If statistics exist, restore its matching completed tree before retrying."
+        )
+    return False
+
+
+def session_products(session):
+    """List the files and station aliases consumed by GLOBK and the ZTD reader."""
+    return {
+        "directory": session.pwd_glbf,
+        "name": session.DirName,
+        "network": session.NetName,
+        "date": session.date,
+        "stations": [
+            (station.StationAlias, station.NetworkCode, station.StationCode)
+            for station in session.StationInstances
+        ],
+    }
+
+
 class GamitSession(object):
     def __init__(
         self,
@@ -38,6 +176,8 @@ class GamitSession(object):
         stations,
         ties=(),
         centroid=(),
+        *,
+        rebuild=False,
     ):
         """
         The GAMIT session object creates all the directory structure and configuration files according to the parameters
@@ -135,84 +275,40 @@ class GamitSession(object):
             "subnet": 0 if subnet is None else subnet,
         }
 
-        try:
-            # attempt to retrieve the session from the database. If error is raised, then the session has to be
-            # reprocessed
-            cnn.get("gamit_stats", row_key.copy())
-            self.ready = True
-        except:
-            self.ready = False
-
-            try:
-                # since ready == False, then try to delete record in subnets
-                cnn.delete("gamit_subnets", **row_key.copy())
-            except:
-                pass
-
-        # a list to report missing data for this session
+        self.ready = completed_session(cnn, self.solution_pwd, row_key) and not rebuild
         self.missing_data = []
+        self.subnet_record = {
+            **row_key,
+            "stations": [stationID(s) for s in stations + list(ties)],
+            "alias": [s.StationAlias for s in stations + list(ties)],
+            "ties": [s["name"] for s in self.tie_dict],
+            "centroid": [round(float(c), 1) for c in centroid],
+        }
 
-        if not os.path.exists(self.solution_pwd):
-            # if the path does not exist, create it!
-            os.makedirs(self.solution_pwd)
-            # force ready = False, no matter what the database says
-            self.ready = False
-            try:
-                cnn.delete("gamit_stats", **row_key.copy())
-                cnn.delete("gamit_subnets", **row_key.copy())
-            except:
-                pass
-
-        elif os.path.exists(self.solution_pwd) and not self.ready:
-            # if the solution directory exists but the session is not ready, kill the directory
-            rmtree(self.solution_pwd)
-
+        # Produce fresh input outside the published session. Check-mode and
+        # missing-station reruns continue to address the previous completed day.
+        self.prepared_pwd = self.solution_pwd
         if not self.ready:
-            # insert the subnet in the database
-            cnn.insert(
-                "gamit_subnets",
-                **{
-                    **row_key,
-                    "stations": "{%s}"
-                    % ",".join(stationID(s) for s in stations + list(ties)),
-                    "alias": "{%s}"
-                    % ",".join(s.StationAlias for s in stations + list(ties)),
-                    "ties": "{%s}" % ",".join(s["name"] for s in self.tie_dict),
-                    "centroid": "{%s}" % ",".join("%.1f" % c for c in centroid),
-                },
+            parent = Path(self.solution_pwd).parent
+            parent.mkdir(parents=True, exist_ok=True)
+            self.prepared_pwd = tempfile.mkdtemp(
+                prefix=f".{self.DirName}-attempt-", dir=parent
             )
-
-        self.pwd_igs = os.path.join(self.solution_pwd, "igs")
-        self.pwd_brdc = os.path.join(self.solution_pwd, "brdc")
-        self.pwd_rinex = os.path.join(self.solution_pwd, "rinex")
-        self.pwd_tables = os.path.join(self.solution_pwd, "tables")
+        self.pwd_igs = os.path.join(self.prepared_pwd, "igs")
+        self.pwd_brdc = os.path.join(self.prepared_pwd, "brdc")
+        self.pwd_rinex = os.path.join(self.prepared_pwd, "rinex")
+        self.pwd_tables = os.path.join(self.prepared_pwd, "tables")
         self.pwd_glbf = os.path.join(self.solution_pwd, "glbf")
-        self.pwd_proc = os.path.join(self.solution_pwd, date.ddd())
+        self.pwd_proc = os.path.join(self.prepared_pwd, date.ddd())
 
         if not self.ready:
-            # only create folders, etc if it was determined the solution isn't ready
-            if not os.path.exists(self.pwd_igs):
-                os.makedirs(self.pwd_igs)
-
-            if not os.path.exists(self.pwd_brdc):
-                os.makedirs(self.pwd_brdc)
-
-            if os.path.exists(self.pwd_rinex):
-                # delete any possible rinex files from a truncated session
-                rmtree(self.pwd_rinex)
-            os.makedirs(self.pwd_rinex)
-
-            if not os.path.exists(self.pwd_tables):
-                os.makedirs(self.pwd_tables)
-
-            # check that the processing directory doesn't exist.
-            # if it does, remove (it has already been determined that the solution is not ready
-            if os.path.exists(self.pwd_glbf):
-                rmtree(self.pwd_glbf)
-
-            if os.path.exists(self.pwd_proc):
-                rmtree(self.pwd_proc)
-
+            for folder in (
+                self.pwd_igs,
+                self.pwd_brdc,
+                self.pwd_rinex,
+                self.pwd_tables,
+            ):
+                os.makedirs(folder)
             self.generate_kml()
 
     def initialize(self):
@@ -235,14 +331,25 @@ class GamitSession(object):
 
         self.params = {
             "solution_pwd": self.solution_pwd,
+            "prepared_pwd": self.prepared_pwd,
+            "subnet_record": self.subnet_record,
             "remote_pwd": self.remote_pwd,
             "NetName": self.NetName,
             "DirName": self.DirName,
             "subnet": self.subnet if self.subnet is not None else 0,
             "rinex": rinex_list,
             "date": self.date,
-            "options": self.Config.options,
-            "gamitopts": self.GamitOpts,
+            "gamitopts": {
+                key: self.GamitOpts[key]
+                for key in (
+                    "systems",
+                    "org",
+                    "expt",
+                    "eop_type",
+                    "noftp",
+                    "overconst_action",
+                )
+            },
             "orbits": {
                 "sp3_path": self.Config.sp3_path,
                 "sp3types": self.Config.sp3types,
@@ -493,4 +600,4 @@ $$\n"""
         # import html
         # cgi.escape = html.escape
 
-        kml.savekmz(os.path.join(self.solution_pwd, self.DirName) + ".kmz")
+        kml.savekmz(os.path.join(self.prepared_pwd, self.DirName) + ".kmz")

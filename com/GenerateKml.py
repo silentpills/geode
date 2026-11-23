@@ -13,6 +13,7 @@ import base64
 import datetime
 import io
 import os
+from functools import partial
 
 # deps
 import matplotlib
@@ -219,7 +220,7 @@ def description_content(
     return stn, style, description
 
 
-def callback_handle(job):
+def callback_handle(job, *, styles):
     # callback to add the station to the kml
     global kml, folder_project, folder_allstns, stnlist
 
@@ -234,7 +235,7 @@ def callback_handle(job):
             folder = folder_allstns
 
         pt = folder.newpoint(name=stationID(stn), coords=[(stn["lon"], stn["lat"])])
-        pt.stylemap = style
+        pt.stylemap = styles[style]
         pt.description = description
 
 
@@ -319,21 +320,13 @@ def generate_kml_stninfo(
 
     pbar = tqdm(desc=" >> Adding stations", total=len(rs), ncols=80, disable=None)
 
-    depfuncs = (plot_station_info_rinex, plot_rinex_completion, stationID)
-
     JobServer.create_cluster(
         description_content,
-        depfuncs,
-        callback_handle,
-        pbar,
-        modules=(
-            "geode.pyDate",
-            "geode.dbConnection",
-            "datetime",
-            "numpy",
-            "io",
-            "base64",
+        callback=partial(
+            callback_handle,
+            styles={"ok": styles_ok, "warn": styles_nok, "other": stylec},
         ),
+        progress_bar=pbar,
     )
 
     for stn in rs:
@@ -375,9 +368,9 @@ def generate_kml_stninfo(
             # or with less than 60% completion (PPP)
             stn_issues = []
             if not gaps and len(stninfo.records) > 0:
-                style = styles_ok
+                style = "ok"
             else:
-                style = styles_nok
+                style = "warn"
 
                 if len(stninfo.records) == 0:
                     stn_issues.append("Station has not station information records!")
@@ -421,11 +414,11 @@ def generate_kml_stninfo(
             # or with less than 60% completion (PPP)
             if stationID(stn) in stnlist:
                 if count >= 100 and (float(ppp_s) / float(count) * 100) >= 60.0:
-                    style = styles_ok
+                    style = "ok"
                 else:
-                    style = styles_nok
+                    style = "warn"
             else:
-                style = stylec
+                style = "other"
 
             stn_issues = []
 
@@ -437,7 +430,7 @@ def generate_kml_stninfo(
             completion,
             stn_issues,
             stninfotxt,
-            stninfo.records,
+            station_info_intervals(stninfo.records),
             data,
             style,
         )
@@ -574,7 +567,10 @@ def generate_kml(cnn, project, data=False):
             style = stylec
 
         plt = plot_station_info_rinex(
-            cnn, stn["NetworkCode"], stn["StationCode"], stninfo
+            cnn,
+            stn["NetworkCode"],
+            stn["StationCode"],
+            station_info_intervals(stninfo.records),
         )
 
         if data:
@@ -627,23 +623,21 @@ RINEX count: %i PPP soln: %s%%<br><br>
     kml.savekmz("production/" + project + ".kmz")
 
 
-def plot_station_info_rinex(cnn, NetworkCode, StationCode, stninfo_records):
+def station_info_intervals(records):
+    """Project station history onto the fractional-year intervals used by the plot."""
+    return [
+        (
+            record["DateStart"].fyear,
+            record["DateEnd"].fyear
+            if record["DateEnd"].year not in (None, 9999)
+            else pyDate.Date(datetime=datetime.datetime.now()).fyear,
+        )
+        for record in records or ()
+    ]
+
+
+def plot_station_info_rinex(cnn, NetworkCode, StationCode, intervals):
     import matplotlib.pyplot as plt
-
-    stnfo = []
-
-    if stninfo_records is not None:
-        for record in stninfo_records:
-            stnfo.append(
-                [
-                    record["DateStart"].fyear,
-                    (
-                        record["DateEnd"].fyear
-                        if record["DateEnd"].year not in (None, 9999)
-                        else pyDate.Date(datetime=datetime.datetime.now()).fyear
-                    ),
-                ]
-            )
 
     rinex = numpy.array(
         cnn.query_float(
@@ -659,7 +653,7 @@ def plot_station_info_rinex(cnn, NetworkCode, StationCode, stninfo_records):
     ax.grid(True)
     ax.set_title("RINEX and Station Information for %s.%s" % (NetworkCode, StationCode))
 
-    for poly in stnfo:
+    for poly in intervals:
         ax.plot(poly, [1, 1], "o-", linewidth=2, markersize=4, color="tab:orange")
         # break line to clearly show the stop of a station info
         ax.plot([poly[1], poly[1]], [-0.5, 1.5], ":", color="tab:orange")

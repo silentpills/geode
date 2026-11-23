@@ -14,6 +14,7 @@ import numpy
 
 # app
 from geode import dbConnection
+from geode.gamit.gamit_session import replace_day, session_products
 from geode.Utils import file_readlines
 
 
@@ -21,11 +22,14 @@ class ParseZtdTask:
     def __init__(self, GamitConfig, project, sessions, date):
         self.date = date
         self.project = project
-        self.sessions = sessions
-        self.org = GamitConfig.gamitopt["org"]
+        if isinstance(GamitConfig, str):
+            self.sessions = sessions
+            self.org = GamitConfig
+        else:
+            self.sessions = [session_products(s) for s in sessions]
+            self.org = GamitConfig.gamitopt["org"]
 
-    def execute(self):
-        cnn = dbConnection.Cnn("gnss_data.cfg")
+    def execute(self, cnn=None):
         # atmospheric zenith delay list
         atmzen = []
         # a dictionary for the station aliases lookup table
@@ -35,7 +39,7 @@ class ParseZtdTask:
         for GamitSession in self.sessions:
             try:
                 znd = os.path.join(
-                    GamitSession.pwd_glbf, self.org + self.date.wwwwd() + ".znd"
+                    GamitSession["directory"], self.org + self.date.wwwwd() + ".znd"
                 )
 
                 if os.path.isfile(znd):
@@ -49,22 +53,20 @@ class ParseZtdTask:
                     )
                     # add the year doy tuple to the result
                     atmzen += [
-                        i + (GamitSession.date.year, GamitSession.date.doy) for i in v
+                        i + (GamitSession["date"].year, GamitSession["date"].doy)
+                        for i in v
                     ]
 
                     # create a lookup table for station aliases
                     for zd in v:
-                        for StnIns in GamitSession.StationInstances:
-                            if (
-                                StnIns.StationAlias.upper() == zd[0]
-                                and zd[0] not in alias
-                            ):
-                                alias[zd[0]] = [StnIns.NetworkCode, StnIns.StationCode]
+                        for name, network, station in GamitSession["stations"]:
+                            if name.upper() == zd[0] and zd[0] not in alias:
+                                alias[zd[0]] = [network, station]
 
             except:
                 err.append(
                     " -- Error parsing zenith delays for session %s:\n%s"
-                    % (GamitSession.NetName, traceback.format_exc())
+                    % (GamitSession["network"], traceback.format_exc())
                 )
                 return err
 
@@ -96,11 +98,6 @@ class ParseZtdTask:
 
             # get the stations in the processing
             stations = [str(stn) for stn in numpy.unique(atmzen["stn"])]
-
-            cnn.query(
-                'DELETE FROM gamit_ztd WHERE "Project" = \'%s\' AND "Year" = %i AND "DOY" = %i'
-                % (self.project.lower(), self.date.year, self.date.doy)
-            )
 
             ztd = []
             for stn in stations:
@@ -150,24 +147,30 @@ class ParseZtdTask:
                                 % stn
                             )
 
-            for ztd in ztd:
-                # now do the insert
-                try:
-                    cnn.insert(
-                        "gamit_ztd",
-                        NetworkCode=ztd[0],
-                        StationCode=ztd[1],
-                        Date=ztd[2],
-                        Project=ztd[3],
-                        model=numpy.round(ztd[4], 4),
-                        sigma=numpy.round(ztd[5], 4),
-                        ZTD=numpy.round(ztd[6], 4),
-                        Year=ztd[7],
-                        DOY=ztd[8],
+            if not err:
+                rows = [
+                    dict(
+                        NetworkCode=k[0],
+                        StationCode=k[1],
+                        Date=k[2],
+                        Project=k[3],
+                        model=numpy.round(k[4], 4),
+                        sigma=numpy.round(k[5], 4),
+                        ZTD=numpy.round(k[6], 4),
+                        Year=k[7],
+                        DOY=k[8],
                     )
+                    for k in ztd
+                ]
+                if cnn is None:
+                    cnn = dbConnection.Cnn("gnss_data.cfg")
+                    try:
+                        replace_day(
+                            cnn, "gamit_ztd", self.project.lower(), self.date, rows
+                        )
+                    finally:
+                        cnn.close()
+                else:
+                    replace_day(cnn, "gamit_ztd", self.project.lower(), self.date, rows)
 
-                except Exception as e:
-                    err.append(" -- Error inserting parsed zenith delay: %s" % str(e))
-
-        cnn.close()
         return err

@@ -79,6 +79,7 @@ class Network(object):
         check_stations=None,
         ignore_missing=False,
     ):
+        self.rebuild_subnets = set()
         self.name = GamitConfig.NetworkConfig.network_id.lower()
         self.org = GamitConfig.gamitopt["org"]
         self.GamitConfig = GamitConfig
@@ -167,21 +168,7 @@ class Network(object):
                             # stations is in the database but there was no
                             # solution for this day, rerun
 
-                            for table in ("gamit_stats", "gamit_subnets"):
-                                cnn.query(
-                                    "DELETE FROM %s WHERE "
-                                    "\"Project\" = '%s' AND "
-                                    '"Year"    = %i AND '
-                                    '"DOY"     = %i AND '
-                                    "subnet    = %i"
-                                    % (
-                                        table,
-                                        self.name,
-                                        self.date.year,
-                                        self.date.doy,
-                                        subnet["subnet"],
-                                    )
-                                )
+                            self.rebuild_subnets.add(subnet["subnet"])
 
                             # DDG: support up to 999 subnetworks
                             tqdm.write(
@@ -388,15 +375,7 @@ class Network(object):
             clusters["stations"][0].append(add_station)
             clusters["labels"] = np.zeros(len(clusters["stations"][0]))
 
-            # because a station was added, delete the gamit_stats record to
-            # force reprocessing
-            for table in ("gamit_stats", "gamit_subnets"):
-                # DDG: change to query statement to delete all systems (GNSS support)
-                cnn.query(
-                    f'DELETE from {table} WHERE "Project"=\'{self.name}\' AND "Year"={self.date.year} AND '
-                    f'"DOY"={self.date.doy} AND subnet=0'
-                )
-                # cnn.delete(table, Project=self.name, Year=self.date.year, DOY=self.date.doy, subnet=0)
+            self.rebuild_subnets.add(0)
 
             tqdm.write(
                 " -- %s was not originally in the processing, will be added to network %s"
@@ -413,15 +392,7 @@ class Network(object):
 
             # can add the station to this sub-network
             clusters["stations"][min_i].append(add_station)
-            # because a station was added, delete the gamit_stats and subnets
-            # record to force reprocessing
-            for table in ("gamit_stats", "gamit_subnets"):
-                # DDG: change to query statement to delete all systems (GNSS support)
-                cnn.query(
-                    f'DELETE from {table} WHERE "Project"=\'{self.name}\' AND "Year"={self.date.year} AND '
-                    f'"DOY"={self.date.doy} AND subnet={min_i + 1}'
-                )
-                # cnn.delete(table, Project=self.name, Year=self.date.year, DOY=self.date.doy, subnet=min_i + 1)
+            self.rebuild_subnets.add(min_i + 1)
 
             tqdm.write(
                 " -- %s was not originally in the processing, will be added to sub-network %s%03i"
@@ -445,6 +416,7 @@ class Network(object):
                     date,
                     self.GamitConfig,
                     backbone,
+                    rebuild=0 in self.rebuild_subnets,
                 )
             )
 
@@ -462,6 +434,7 @@ class Network(object):
                         clusters["stations"][c],
                         ties[c],
                         clusters["centroids"][c].tolist(),
+                        rebuild=c + 1 in self.rebuild_subnets,
                     )
                 )
 
@@ -476,6 +449,7 @@ class Network(object):
                     date,
                     self.GamitConfig,
                     clusters["stations"][0],
+                    rebuild=0 in self.rebuild_subnets,
                 )
             )
 

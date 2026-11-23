@@ -57,9 +57,7 @@ from geode.Utils import (
     add_version_argument,
     dir_try_remove,
     file_append,
-    file_open,
     file_try_remove,
-    get_field_or_attr,
     stationID,
 )
 
@@ -866,15 +864,15 @@ def print_archive_service_summary():
         print("\n >> No files were imported in this run.")
 
 
-def process_visit_file(Config, record):
+def process_visit_file(repository, media, record):
     # import raw file processing functions
 
     try:
         cnn = dbConnection.Cnn("gnss_data.cfg")
-        data_in = os.path.join(Config.repository, "data_in/%s" % stationID(record))
+        data_in = os.path.join(repository, "data_in/%s" % stationID(record))
 
         # get a hold of the file and make sure it exists
-        filename = os.path.join(Config.media, record["file"])
+        filename = os.path.join(media, record["file"])
 
         convert = ConvertRaw.ConvertRaw(record["StationCode"], filename, data_in)
 
@@ -912,11 +910,11 @@ def process_visit_file(Config, record):
         return str(e), False
 
 
-def merge_rinex_files(Config, record):
+def merge_rinex_files(repository, record):
     # import raw file processing functions
 
     try:
-        data_in = os.path.join(Config.repository, "data_in/%s" % stationID(record))
+        data_in = os.path.join(repository, "data_in/%s" % stationID(record))
 
         # invoke the convert object with no path_to_raw: will be used just to merge
         convert = ConvertRaw.ConvertRaw(record["StationCode"], "", data_in)
@@ -968,30 +966,13 @@ def process_visits(JobServer):
         desc="%-30s" % " >> Processing visits", total=len(rs), ncols=160, disable=None
     )
 
-    # dependency functions
-    depfuncs = (get_field_or_attr, stationID)
-
     # import modules
     JobServer.create_cluster(
-        process_visit_file,
-        depfuncs,
-        callback_handle,
-        pbar,
-        modules=(
-            "geode.pyRinex",
-            "geode.ConvertRaw",
-            "geode.pyEvents",
-            "geode.dbConnection",
-            "geode.pyRunWithRetry",
-            "geode.Utils",
-            "geode.pyRinexName",
-            "platform",
-            "os",
-        ),
+        process_visit_file, callback=callback_handle, progress_bar=pbar
     )
 
     for record in rs:
-        JobServer.submit(Config, record)
+        JobServer.submit(Config.repository, Config.media, record)
 
     JobServer.wait()
     pbar.close()
@@ -1012,24 +993,10 @@ def process_visits(JobServer):
 
     # import modules
     JobServer.create_cluster(
-        merge_rinex_files,
-        depfuncs,
-        callback_handle,
-        pbar,
-        modules=(
-            "geode.pyRinex",
-            "geode.ConvertRaw",
-            "geode.pyEvents",
-            "geode.dbConnection",
-            "geode.pyRunWithRetry",
-            "geode.Utils",
-            "geode.pyRinexName",
-            "platform",
-            "os",
-        ),
+        merge_rinex_files, callback=callback_handle, progress_bar=pbar
     )
     for record in stns:
-        JobServer.submit(Config, record)
+        JobServer.submit(Config.repository, record)
 
     JobServer.wait()
     pbar.close()
@@ -1219,44 +1186,9 @@ def main():
         disable=None,
     )
 
-    # dependency functions
-    depfuncs = (
-        check_rinex_timespan_int,
-        write_error,
-        error_handle,
-        insert_data,
-        verify_rinex_multiday,
-        file_append,
-        file_try_remove,
-        file_open,
-    )
-
     # import modules
     JobServer.create_cluster(
-        process_crinex_file,
-        depfuncs,
-        callback_handle,
-        pbar,
-        modules=(
-            "geode.pyRinex",
-            "geode.pyArchiveStruct",
-            "geode.pyOTL",
-            "geode.metadata.station_info",
-            "geode.dbConnection",
-            "geode.Utils",
-            "geode.pyDate",
-            "geode.pyProducts",
-            "geode.pyOptions",
-            "geode.pyEvents",
-            "geode.pyRinexName",
-            "geode.pyPPP",
-            "os",
-            "uuid",
-            "datetime",
-            "numpy",
-            "traceback",
-            "platform",
-        ),
+        process_crinex_file, callback=callback_handle, progress_bar=pbar
     )
 
     for file_to_process, sfile in files_list:

@@ -467,23 +467,7 @@ def main():
         total=len(dra.stations), desc=" >> Computing DRAs", ncols=160, disable=None
     )
 
-    modules = (
-        "geode.dbConnection",
-        "geode.etm.core.etm_engine",
-        "geode.etm.core.etm_config",
-        "geode.etm.core.type_declarations",
-        "io",
-        "numpy",
-        "logging",
-    )
-
-    JobServer.create_cluster(
-        compute_dra,
-        progress_bar=qbar,
-        callback=callback_handler,
-        modules=modules,
-        deps=(save_excluded_soln,),
-    )
+    JobServer.create_cluster(compute_dra, progress_bar=qbar, callback=callback_handler)
 
     # plot each DRA
     for stn in dra.stations:

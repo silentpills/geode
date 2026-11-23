@@ -201,10 +201,11 @@ class Msg:
     class CLIENT_STOPPED(NamedTuple):
         server_id: int
 
-    # Messages from dispy job manager:
+    # Messages from file-processing job manager:
     class PROCESS_RESULT(NamedTuple):
         file: Optional[FileDescriptor]
         error: Optional[str]
+        infrastructure_error: Optional[str] = None
 
 
 ###############################################################################
@@ -432,7 +433,7 @@ class FilesBag:
 ###############################################################################
 
 
-def thread_queue_all_files(cnn, drange, stations, msg_outbox):
+def thread_queue_all_files(cnn, drange, stations, put_message):
     db_archive = pyArchiveStruct.RinexStruct(cnn)
     stations_items = tuple(stations.items())
 
@@ -464,7 +465,8 @@ def thread_queue_all_files(cnn, drange, stations, msg_outbox):
                     cnn, stn.NetworkCode, stn.StationCode, allow_empty=True
                 )
                 if stn_reconds.records:
-                    msg_outbox.put(Msg.FILE_SKIPPED_INACTIVE_STATION(file=f))
+                    if not put_message(Msg.FILE_SKIPPED_INACTIVE_STATION(file=f)):
+                        return
                     continue
                 else:
                     pass
@@ -478,11 +480,12 @@ def thread_queue_all_files(cnn, drange, stations, msg_outbox):
             )
 
             exists_in_db = rinex and rinex[0]["Completion"] >= 0.5
-            msg_outbox.put(
+            if not put_message(
                 Msg.FILE_IGNORED_EXISTS_IN_DB(file=f)
                 if exists_in_db
                 else Msg.NEW_FILE(file=f)
-            )
+            ):
+                return
 
 
 ###############################################################################
@@ -491,13 +494,14 @@ def thread_queue_all_files(cnn, drange, stations, msg_outbox):
 
 
 class JobsManager:
-    """Submits PROCESS jobs to cluster while minimizing dispy queue usage"""
+    """Submits PROCESS jobs to cluster with a bounded number of outstanding jobs"""
 
     def __init__(self, job_server: pyJobServer.JobServer, abspath_scripts_dir: str):
         self.job_server = job_server
         self.abspath_scripts_dir = abspath_scripts_dir
 
         self.files_pending = FilesBag()
+        self.halted = False
         self.cpus_qty = 0 if job_server.run_parallel else 1
         self.jobs_submitted = {}  # jobID -> File
         self.jobs_lock = threading.RLock()
@@ -506,7 +510,7 @@ class JobsManager:
         self.on_process_result = None
 
     def on_nodes_changed(self, nodes: list):
-        """called by dispy"""
+        """Update capacity when the worker pool changes."""
         with self.jobs_lock:
             self.cpus_qty = sum(n.avail_cpus for n in nodes)
             tqdm.write(
@@ -516,18 +520,19 @@ class JobsManager:
             self._submit_pending()
 
     def on_job_result(self, job):
-        """called by dispy"""
+        """Deliver a completed conversion to the download coordinator."""
         with self.jobs_lock:
-            f = self.jobs_submitted[job.id]
-            del self.jobs_submitted[job.id]
-
-            self.on_process_result(f, job.exception)
-
-            self._submit_pending()
+            f = self.jobs_submitted.pop(job.id)
+            if job.infrastructure_error:
+                self.halted = True
+        # The coordinator drains a bounded queue and may itself be submitting
+        # work. Never hold its submission lock while waiting for queue capacity.
+        self.on_process_result(f, job.exception, job.infrastructure_error)
+        self._submit_pending()
 
     def _can_submit_more(self):
-        # cpus * 2 only to ensure dispy always has work to do
-        return len(self.jobs_submitted) < (self.cpus_qty * 2)
+        # cpus * 2 only to keep processing workers supplied
+        return not self.halted and len(self.jobs_submitted) < (self.cpus_qty * 2)
 
     def _submit(self, f: File):
         with self.jobs_lock:
@@ -603,28 +608,37 @@ def download_all_stations_data(
 
     files_pending_qty = 0
 
+    closing = threading.Event()
+
+    def put_message(message, timeout=None):
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        while not closing.is_set():
+            wait = 0.25
+            if deadline is not None:
+                wait = max(0, min(wait, deadline - time.monotonic()))
+            try:
+                msg_inbox.put(message, timeout=wait)
+                return True
+            except queue.Full:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return False
+        return False
+
     def on_download_result(
         server_id: int, error: Optional[str], elapsed_time=0, size=0, timeout=None
     ):
-        try:
-            msg_inbox.put(
-                Msg.DOWNLOAD_RESULT(
-                    server_id=server_id,
-                    elapsed_time=elapsed_time,
-                    size=size,
-                    error=error,
-                ),
-                timeout=timeout,
+        return (
+            put_message(
+                Msg.DOWNLOAD_RESULT(server_id, elapsed_time, size, error), timeout
             )
-            return True
-        except queue.Full:
-            return False
+            or closing.is_set()
+        )
 
-    def on_process_result(file: FileDescriptor, error: Optional[str]):
-        msg_inbox.put(Msg.PROCESS_RESULT(file=file, error=error))
+    def on_process_result(file, error, infrastructure_error):
+        put_message(Msg.PROCESS_RESULT(file, error, infrastructure_error))
 
     def on_client_stopped(server_id: int):
-        msg_inbox.put(Msg.CLIENT_STOPPED(server_id=server_id))
+        put_message(Msg.CLIENT_STOPPED(server_id=server_id))
 
     class stats:
         ok = 0
@@ -778,7 +792,9 @@ def download_all_stations_data(
 
     # 2- Start thread to Query DB for files
     # stations_stopped = set()
-    _thread.start_new_thread(thread_queue_all_files, (cnn, drange, stations, msg_inbox))
+    _thread.start_new_thread(
+        thread_queue_all_files, (cnn, drange, stations, put_message)
+    )
 
     # 3- Coordinate downloads & process
     pbar = tqdm(
@@ -788,100 +804,109 @@ def download_all_stations_data(
         bar_format=PBAR_FORMAT,
         disable=None,
     )
-    with pbar:
-        while files_pending_qty:
-            msg = msg_inbox.get()
+    try:
+        with pbar:
+            while files_pending_qty:
+                msg = msg_inbox.get()
 
-            if isinstance(msg, Msg.NEW_FILE):
-                fd = msg.file
-                # query first source
-                queue_download(fd.stn_idx, fd.date_mjd, fd.src_idx)
-
-            elif isinstance(msg, Msg.FILE_SKIPPED_INACTIVE_STATION):
-                f = File.from_descriptor(stations, msg.file)
-                stats.db_no_info += 1
-                file_finished(
-                    f,
-                    "FILE SKIPPED: No Station info in DB - assume Station is inactive for this date",
-                )
-
-            elif isinstance(msg, Msg.FILE_IGNORED_EXISTS_IN_DB):
-                f = File.from_descriptor(stations, msg.file)
-                stats.db_exists += 1
-                file_finished(f, "FILE IGNORED: File exists in DB")
-
-            elif isinstance(msg, Msg.CLIENT_STOPPED):
-                server = servers[msg.server_id]
-                tqdm.write(
-                    "[SERVER-%03d] WARNING: CONNECTION STOPPED (%s)"
-                    % (msg.server_id, server.client.proto.desc())
-                )
-                server.stopped = True
-
-                # for (stn_idx, stn) in stations.items():
-                #     for src in stn.sources:
-                #         srv = servers.get(src.server_id, None)
-                #         if not srv or not srv.stopped:
-                #             break
-                #     else:
-                #         stations_stopped.add(stn_idx)
-
-            elif isinstance(msg, Msg.DOWNLOAD_RESULT):
-                server = servers[msg.server_id]
-                f = server.file_current
-                server.file_current = None
-
-                if msg.error:
-                    tqdm.write(
-                        "%s Download Error! %s %s: %s"
-                        % (f.desc, f.src_desc, f.url, msg.error)
-                    )
-                    queue_download_next_source(f)
-                else:
-                    postfix = "size=%dkB time=%ds speed=%dkB/s %s %s" % (
-                        msg.size // 1024,
-                        msg.elapsed_time,
-                        (msg.size // 1024) / msg.elapsed_time,
-                        f.src_desc,
-                        f.url,
-                    )
-                    fmt = f.source.format
-                    if fmt and fmt != "DEFAULT_FORMAT":
-                        tqdm.write(
-                            "%s Downloaded ok! format=%r %s" % (f.desc, fmt, postfix)
-                        )
-                        jobs_manager.queue_process(f)
-                    else:
-                        stats.ok += 1
-                        file_finished(f, "DOWNLOAD OK: %s" % postfix)
-
-                # Pop next file for same server
-                if not server.files_pending.is_empty():
-                    fd = server.files_pending.pop()
+                if isinstance(msg, Msg.NEW_FILE):
+                    fd = msg.file
+                    # query first source
                     queue_download(fd.stn_idx, fd.date_mjd, fd.src_idx)
 
-            elif isinstance(msg, Msg.PROCESS_RESULT):
-                f = File.from_descriptor(stations, msg.file)
-                if msg.error:
-                    tqdm.write(
-                        "%s Process ERROR! format=%r: %s %s\n%s"
-                        % (f.desc, f.source.format, f.src_desc, f.url, msg.error)
+                elif isinstance(msg, Msg.FILE_SKIPPED_INACTIVE_STATION):
+                    f = File.from_descriptor(stations, msg.file)
+                    stats.db_no_info += 1
+                    file_finished(
+                        f,
+                        "FILE SKIPPED: No Station info in DB - assume Station is inactive for this date",
                     )
-                    # Try next download source,
-                    # maybe file is in better shape in another server
-                    stats.process_error += 1
-                    queue_download_next_source(f)
-                else:
-                    stats.process_ok += 1
-                    file_finished(f, "PROCESS OK")
+
+                elif isinstance(msg, Msg.FILE_IGNORED_EXISTS_IN_DB):
+                    f = File.from_descriptor(stations, msg.file)
+                    stats.db_exists += 1
+                    file_finished(f, "FILE IGNORED: File exists in DB")
+
+                elif isinstance(msg, Msg.CLIENT_STOPPED):
+                    server = servers[msg.server_id]
+                    tqdm.write(
+                        "[SERVER-%03d] WARNING: CONNECTION STOPPED (%s)"
+                        % (msg.server_id, server.client.proto.desc())
+                    )
+                    server.stopped = True
+
+                    # for (stn_idx, stn) in stations.items():
+                    #     for src in stn.sources:
+                    #         srv = servers.get(src.server_id, None)
+                    #         if not srv or not srv.stopped:
+                    #             break
+                    #     else:
+                    #         stations_stopped.add(stn_idx)
+
+                elif isinstance(msg, Msg.DOWNLOAD_RESULT):
+                    server = servers[msg.server_id]
+                    f = server.file_current
+                    server.file_current = None
+
+                    if msg.error:
+                        tqdm.write(
+                            "%s Download Error! %s %s: %s"
+                            % (f.desc, f.src_desc, f.url, msg.error)
+                        )
+                        queue_download_next_source(f)
+                    else:
+                        postfix = "size=%dkB time=%ds speed=%dkB/s %s %s" % (
+                            msg.size // 1024,
+                            msg.elapsed_time,
+                            (msg.size // 1024) / msg.elapsed_time,
+                            f.src_desc,
+                            f.url,
+                        )
+                        fmt = f.source.format
+                        if fmt and fmt != "DEFAULT_FORMAT":
+                            tqdm.write(
+                                "%s Downloaded ok! format=%r %s"
+                                % (f.desc, fmt, postfix)
+                            )
+                            jobs_manager.queue_process(f)
+                        else:
+                            stats.ok += 1
+                            file_finished(f, "DOWNLOAD OK: %s" % postfix)
+
+                    # Pop next file for same server
+                    if not server.files_pending.is_empty():
+                        fd = server.files_pending.pop()
+                        queue_download(fd.stn_idx, fd.date_mjd, fd.src_idx)
+
+                elif isinstance(msg, Msg.PROCESS_RESULT):
+                    if msg.infrastructure_error:
+                        raise RuntimeError(
+                            "Conversion outcome is unconfirmed. Inspect the job receipt "
+                            f"before retrying this file: {msg.infrastructure_error}"
+                        )
+                    f = File.from_descriptor(stations, msg.file)
+                    if msg.error:
+                        tqdm.write(
+                            "%s Process ERROR! format=%r: %s %s\n%s"
+                            % (f.desc, f.source.format, f.src_desc, f.url, msg.error)
+                        )
+                        # Try next download source,
+                        # maybe file is in better shape in another server
+                        stats.process_error += 1
+                        queue_download_next_source(f)
+                    else:
+                        stats.process_ok += 1
+                        file_finished(f, "PROCESS OK")
+
+    finally:
+        closing.set()
+        for server in servers.values():
+            server.client.finish()
 
     # 4- Cleanup
 
     tqdm.write("-" * 70)
     tqdm.write("Finished all Downloads and Processing")
-
-    for server in servers.values():
-        server.client.finish()
 
     for stn in stations.values():
         # This will keep the dest_dir if files are present in it:
@@ -1642,25 +1667,11 @@ def main():
         )
 
         # process_file dependencies:
-        depfuncs = (dir_try_remove, file_try_remove)
-        depmodules = (
-            "tempfile",
-            "shutil",
-            "os",
-            "subprocess",
-            "glob",
-            # app
-            "geode.pyRinex",
-            "geode.pyRinexName",
-        )
 
         jobs_mgr = JobsManager(job_server, Config.format_scripts_path)
         job_server.create_cluster(
-            process_file,  # called in remote node
-            depfuncs,
-            jobs_mgr.on_job_result,
-            None,
-            modules=depmodules,
+            process_file,
+            callback=jobs_mgr.on_job_result,
             on_nodes_changed=jobs_mgr.on_nodes_changed,
         )
 

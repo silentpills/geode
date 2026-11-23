@@ -187,24 +187,11 @@ def check_rinex_integrity(
     tqdm.write(" >> Archive path: %s" % Config.archive_path)
 
     if operation == "fix":
-        modules = (
-            "os",
-            "geode.pyArchiveStruct",
-            "geode.dbConnection",
-            "geode.pyOptions",
-            "traceback",
-            "platform",
-            "geode.pyEvents",
-        )
-
         pbar = tqdm(total=len(stnlist), ncols=80)
         differences = []
 
         JobServer.create_cluster(
-            check_rinex_stn,
-            callback=stnrnx_callback,
-            progress_bar=pbar,
-            modules=modules,
+            check_rinex_stn, callback=stnrnx_callback, progress_bar=pbar
         )
 
         for stn in stnlist:
@@ -284,16 +271,7 @@ def check_rinex_integrity(
 def stn_info_rinex_integrity(cnn, stnlist, start_date, end_date, JobServer):
     global differences
 
-    modules = (
-        "geode.metadata.station_info",
-        "geode.dbConnection",
-        "geode.pyDate",
-        "traceback",
-    )
-
-    JobServer.create_cluster(
-        compare_stninfo_rinex, callback=stnrnx_callback, modules=modules
-    )
+    JobServer.create_cluster(compare_stninfo_rinex, callback=stnrnx_callback)
 
     for stn in stnlist:
         StationCode = stn["StationCode"]

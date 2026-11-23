@@ -98,7 +98,7 @@ def callback_etm_plot(job):
 
 def process_etm_station(stn, args_dict, from_kmz):
     """
-    Dispy worker: fully self-contained per-station ETM processing.
+    Fit and plot a single station on the selected processing worker.
     args_dict is vars(args) plus two precomputed keys:
       _plot_dates  -> result of process_plot_dates(args)
       _fit_dates   -> result of process_fit_dates(args)
@@ -1383,7 +1383,7 @@ def main():
 
     plot_dates = process_plot_dates(args)
 
-    # Resolve to absolute path so parallel workers (which cd to /tmp/dispy/...) write to the right place
+    # Resolve to absolute path so workers and the CLI address the same output directory
     args.directory = os.path.abspath(args.directory) + os.sep
     if args.filename:
         args.filename = os.path.abspath(args.filename)
@@ -1409,25 +1409,7 @@ def main():
     )
 
     JobServer.create_cluster(
-        process_etm_station,
-        (),
-        callback_etm_plot,
-        pbar,
-        modules=(
-            "geode.dbConnection",
-            "geode.etm.core.etm_engine",
-            "geode.etm.core.etm_config",
-            "geode.etm.core.type_declarations",
-            "geode.etm.data.solution_data",
-            "geode.etm.core.data_classes",
-            "geode.etm.etm_functions.polynomial",
-            "geode.etm.etm_functions.periodic",
-            "geode.etm.etm_functions.jumps",
-            "geode.etm.core.logging_config",
-            "geode.Utils",
-            "geode.pyDate",
-            "numpy",
-        ),
+        process_etm_station, callback=callback_etm_plot, progress_bar=pbar
     )
 
     for stn in stnlist:

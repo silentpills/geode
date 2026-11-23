@@ -383,8 +383,11 @@ class JobServer:
                 if self.failures:
                     exc, *others = self.failures
                     self.failures.clear()
-                    for other in others:
-                        exc.add_note(str(other))
+                    if others:
+                        details = "\n".join(str(error) for error in (exc, *others))
+                        raise RuntimeError(
+                            f"Multiple processing jobs failed:\n{details}"
+                        ) from exc
                     raise exc
         except KeyboardInterrupt:
             self._cancel_pending()

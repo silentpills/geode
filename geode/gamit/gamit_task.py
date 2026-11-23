@@ -10,14 +10,17 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import traceback
 import zipfile
 from datetime import datetime
+from pathlib import Path
 
 import numpy
 
 # app
 from geode import pyProducts, pyRinex
+from geode.gamit.gamit_session import publish_directory
 from geode.Utils import (
     chmod_exec,
     file_append,
@@ -52,7 +55,6 @@ class GamitTask(object):
         self.pwd_glbf = os.path.join(remote_pwd, "glbf")
 
         self.params = params
-        self.options = params["options"]
         self.orbits = params["orbits"]
         self.gamitopts = params["gamitopts"]
         self.systems = params["gamitopts"]["systems"]
@@ -79,7 +81,7 @@ class GamitTask(object):
             ),
         )
 
-    def start(self, dirname, year, doy, dry_run=False):
+    def start(self, dirname, year, doy, dry_run=False, *, check_current=None):
         copy_done = False
 
         try:
@@ -92,9 +94,7 @@ class GamitTask(object):
                 # if OSError occurs, ignore and continue
                 pass
 
-            # if the local folder exists (due to previous incomplete processing, erase it).
-            if os.path.exists(self.pwd):
-                shutil.rmtree(self.pwd)
+            # This attempt owns a unique scratch directory. A collision needs inspection.
 
             # ready to copy the shared solution_dir to pwd
             shutil.copytree(self.solution_pwd, self.pwd, symlinks=True)
@@ -137,6 +137,11 @@ class GamitTask(object):
                             f"Not enough observing stations for system {sys}. Skipping processing."
                         )
 
+                if not results:
+                    raise ValueError(
+                        "No configured constellation has two observing stations"
+                    )
+
                 # combination in GLOBK
                 success_results = [r for r in results if r["success"]]
                 if len(success_results) > 1:
@@ -168,11 +173,6 @@ class GamitTask(object):
 
                 self.finish()
 
-            # DDG: removed from not dry_run section to copy back to solution folder
-            self.move_pwd_to_solution_dir()
-
-            return results
-
         except Exception:
             msg = traceback.format_exc() + "\nProcessing %s date %s on node %s" % (
                 self.params["NetName"],
@@ -186,32 +186,21 @@ class GamitTask(object):
                 # if the copy was done, then it is possible to write, so log the error in monitor
                 self.log("ERROR in GamitTask.start()\n%s" % msg)
 
-                # the solution folder exists because it was created by GamitSession to start the processing.
-                # erase it to upload the result
-                if os.path.exists(self.solution_pwd):
-                    shutil.rmtree(self.solution_pwd)
+                try:
+                    self.move_pwd_to_solution_dir(check_current)
+                except OSError as error:
+                    msg += f"\nUnable to publish diagnostics from {self.pwd}: {error}"
 
-                # execute final error step: copy to self.solution_pwd
-                # ignore_dangling_symlinks=True and symlink=False to avoid errors from broken symlinks
-                # that might exist in tables
-                shutil.copytree(
-                    self.pwd,
-                    self.solution_pwd,
-                    symlinks=False,
-                    ignore_dangling_symlinks=True,
-                )
-                # remove the remote pwd
-                shutil.rmtree(self.pwd)
-
-                # output dummy statistics to the parent for display
-                results = self.run_gamit("G", dummy=True)
-            else:
-                results = self.run_gamit("G", dummy=True)
-
+            results = self.run_gamit("G", dummy=True)
             results["error"] = msg
 
             # return useful information to the main node (return list because now there is one result per system)
             return [results]
+
+        # Publish only after a complete copy. A publication failure reaches the
+        # coordinator as a failed job and leaves scratch available for recovery.
+        self.move_pwd_to_solution_dir(check_current)
+        return results
 
     def log(self, message, no_timestamp=False):
         if not no_timestamp:
@@ -539,40 +528,22 @@ class GamitTask(object):
 
             self.log(f"ERROR in GamitTask.finish()\n{msg}")
 
-    def move_pwd_to_solution_dir(self):
-        try:
-            try:
-                if not os.path.exists(os.path.dirname(self.solution_pwd)):
-                    os.makedirs(os.path.dirname(self.solution_pwd))
-            except OSError:
-                # racing condition having several processes trying to create the same folder
-                # if OSError occurs, ignore and continue
-                pass
-
-            # the solution folder exists because it was created by GamitSession to start the processing.
-            # erase it to upload the result
-            if os.path.exists(self.solution_pwd):
-                shutil.rmtree(self.solution_pwd)
-
-            # execute final step: copy to self.solution_pwd
-            self.log(f"Copy results from {self.pwd} to {self.solution_pwd}")
+    def move_pwd_to_solution_dir(self, check_current=None):
+        destination = Path(self.solution_pwd)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self.log(f"Copy results from {self.pwd} to {destination}")
+        with tempfile.TemporaryDirectory(
+            prefix=f".{destination.name}-stage-", dir=destination.parent
+        ) as temp:
+            staged = Path(temp) / "solution"
             shutil.copytree(
-                self.pwd,
-                self.solution_pwd,
-                symlinks=False,
-                ignore_dangling_symlinks=True,
-            )
-            # remove the remote pwd
-            shutil.rmtree(self.pwd)
-
-        except:
-            msg = traceback.format_exc() + "\nProcessing %s date %s on node %s" % (
-                self.params["NetName"],
-                self.date.yyyyddd(),
-                platform.node(),
+                self.pwd, staged, symlinks=False, ignore_dangling_symlinks=True
             )
 
-            self.log(f"ERROR in GamitTask.move_pwd_to_solution_dir()\n{msg}")
+            if check_current is not None:
+                check_current()
+            publish_directory(staged, destination)
+        shutil.rmtree(self.pwd)
 
     def create_replace_links(self):
         replace_ln_file_path = os.path.join(self.pwd, "replace_links.sh")
@@ -886,7 +857,7 @@ class GamitTask(object):
             self.log("\n".join(re.findall(r"(.*?FATAL.*)", output)), no_timestamp=True)
             fatal = True
             # save the fatals as a list
-            result["fatals"] = set(re.findall(r"(.*?FATAL.*)", output))
+            result["fatals"] = list(dict.fromkeys(re.findall(r"(.*?FATAL.*)", output)))
 
             self.log(f"Unsuccessful run for system {system}. Check fatal message.")
         else:

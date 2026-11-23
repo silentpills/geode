@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
 import simplekml
@@ -28,6 +29,7 @@ from geode.etm.data.solution_data import SolutionDataException
 
 # app
 from geode.gamit import gamit_config, gamit_session, gamit_task, globk_task, parse_ztd
+from geode.gamit.campaign import active_day, campaign_run
 from geode.gamit.station import Station, StationCollection
 from geode.network import Network
 from geode.Utils import (
@@ -154,44 +156,55 @@ def print_summary(stations, sessions, dates):
     return
 
 
-def purge_solution(pwd, project, date):
-    cnn = dbConnection.Cnn("gnss_data.cfg")
+def purge_solution(pwd, project, date, run_id):
+    with active_day(project, date, run_id) as (cnn, _):
+        _purge_solution(cnn, pwd, project, date)
 
+
+def _purge_solution(cnn, pwd, project, date):
     # delete the main solution dir (may be entire GAMIT run or combination directory)
+    if not project or project in {".", ".."} or Path(project).name != project:
+        raise ValueError("Expected a single project name")
     project_path = os.path.join(pwd, project)
     if os.path.isdir(project_path):
         shutil.rmtree(project_path)
 
     # possible subnetworks
-    for sub in glob.glob(project_path + ".*"):
+    for sub in glob.glob(glob.escape(project_path) + ".*"):
         shutil.rmtree(sub)
+    # Interrupted directory swaps can leave complete previous results.
+    # Only this explicit project/day purge may discard them.
+    previous = os.path.join(pwd, "." + project + ".previous")
+    if os.path.isdir(previous):
+        shutil.rmtree(previous)
+    for previous in glob.glob(
+        os.path.join(glob.escape(pwd), "." + glob.escape(project) + ".*.previous")
+    ):
+        shutil.rmtree(previous)
 
     # now remove the database entries
-    for table in (
-        "gamit_soln_excl",
-        "stacks",
-        "gamit_soln",
-        "gamit_stats",
-        "gamit_subnets",
-        "gamit_ztd",
-    ):
-        cnn.query(
-            'DELETE FROM %s WHERE "Year" = %i AND "DOY" = %i '
-            "AND \"Project\" = '%s'" % (table, date.year, date.doy, project)
-        )
+    with cnn.cnn.transaction():
+        for table in (
+            "gamit_soln_excl",
+            "stacks",
+            "gamit_soln",
+            "gamit_stats",
+            "gamit_subnets",
+            "gamit_ztd",
+        ):
+            cnn.cursor.execute(
+                f'DELETE FROM {table} WHERE "Year"=%s AND "DOY"=%s AND "Project"=%s',
+                (date.year, date.doy, project),
+            )
 
-    cnn.close()
 
-
-def purge_solutions(JobServer, args, dates, GamitConfig):
+def purge_solutions(JobServer, args, dates, GamitConfig, run_id):
     if args.purge or args.purge_exit:
         print(" >> Purging selected year-doys before run:")
 
         pbar = tqdm(total=len(dates), ncols=80, desc=" -- Purge progress", disable=None)
 
-        modules = ("geode.pyDate", "geode.dbConnection", "os", "glob", "shutil")
-
-        JobServer.create_cluster(purge_solution, progress_bar=pbar, modules=modules)
+        JobServer.create_cluster(purge_solution, progress_bar=pbar)
 
         for date in dates:
             # base dir for the GAMIT session directories
@@ -203,7 +216,9 @@ def purge_solutions(JobServer, args, dates, GamitConfig):
                 + date.ddd()
             )
 
-            JobServer.submit(pwd, GamitConfig.NetworkConfig.network_id.lower(), date)
+            JobServer.submit(
+                pwd, GamitConfig.NetworkConfig.network_id.lower(), date, run_id
+            )
 
         JobServer.wait()
 
@@ -528,47 +543,51 @@ def main():
     else:
         check_stations = StationCollection()
 
-    dry_run = False if args.dry_run is None else args.dry_run
+    with campaign_run(cnn, GamitConfig.NetworkConfig.network_id, dates) as run_id:
+        dry_run = False if args.dry_run is None else args.dry_run
 
-    if not dry_run and not len(check_stations):
-        # ignore if calling a dry run
-        # purge solutions if requested
-        purge_solutions(JobServer, args, dates, GamitConfig)
-        if args.purge_exit:
+        if not dry_run and not len(check_stations):
+            # ignore if calling a dry run
+            # purge solutions if requested
+            purge_solutions(JobServer, args, dates, GamitConfig, run_id)
+            if args.purge_exit:
+                tqdm.write(
+                    " >> %s Successful exit from ParallelGamit (no run)"
+                    % print_datetime()
+                )
+                exit(0)
+        elif args.purge:
             tqdm.write(
-                " >> %s Successful exit from ParallelGamit (no run)" % print_datetime()
+                " >> Dry run or check mode activated. Cannot purge solutions in this mode."
             )
-            exit(0)
-    elif args.purge:
-        tqdm.write(
-            " >> Dry run or check mode activated. Cannot purge solutions in this mode."
-        )
 
-    # run the job server
-    sessions = execute_gamit(
-        cnn,
-        JobServer,
-        GamitConfig,
-        stations,
-        check_stations,
-        args.ignore_missing,
-        dates,
-        args.dry_run,
-        args.create_kml,
-    )
-
-    # execute globk on doys that had to be divided into subnets
-    if not args.dry_run:
-        execute_globk(cnn, JobServer, GamitConfig, sessions, dates)
-
-        # parse the zenith delay outputs
-        exec_parse_ztd(
-            GamitConfig.NetworkConfig.network_id.lower(),
-            dates,
-            sessions,
-            GamitConfig,
+        # run the job server
+        sessions = execute_gamit(
+            cnn,
             JobServer,
+            GamitConfig,
+            stations,
+            check_stations,
+            args.ignore_missing,
+            dates,
+            args.dry_run,
+            args.create_kml,
+            run_id=run_id,
         )
+
+        # execute globk on doys that had to be divided into subnets
+        if not args.dry_run:
+            execute_globk(cnn, JobServer, GamitConfig, sessions, dates, run_id)
+
+            # parse the zenith delay outputs
+            exec_parse_ztd(
+                GamitConfig.NetworkConfig.network_id.lower(),
+                dates,
+                sessions,
+                GamitConfig,
+                JobServer,
+                run_id,
+            )
 
     tqdm.write(" >> %s Successful exit from ParallelGamit" % print_datetime())
 
@@ -635,64 +654,33 @@ def generate_kml(dates, sessions, GamitConfig):
     kml.savekmz("production/" + GamitConfig.NetworkConfig.network_id.lower() + ".kmz")
 
 
-def exec_parse_ztd(project, dates, Sessions, GamitConfig, JobServer):
+def exec_parse_ztd(project, dates, Sessions, GamitConfig, JobServer, run_id):
     tqdm.write(" >> %s Parsing the tropospheric zenith delays..." % print_datetime())
-
-    modules = (
-        "numpy",
-        "os",
-        "re",
-        "datetime",
-        "traceback",
-        "geode.dbConnection",
-        "geode.gamit.ztd",
-    )
 
     pbar = tqdm(
         total=len(dates), disable=None, desc=" >> Zenith total delay parsing", ncols=100
     )
 
-    JobServer.create_cluster(
-        run_parse_ztd,
-        (parse_ztd.ParseZtdTask, gamit_session.GamitSession),
-        job_callback,
-        pbar,
-        modules=modules,
-    )
+    JobServer.create_cluster(run_parse_ztd, callback=job_callback, progress_bar=pbar)
 
     # parse and insert one day at the time, otherwise, the process becomes too slow for long runs
     for date in dates:
         # get all the session of this day
         sessions = [s for s in Sessions if s.date == date]
-        task = parse_ztd.ParseZtdTask(GamitConfig, project, sessions, date)
-        JobServer.submit(task)
+        products = [gamit_session.session_products(s) for s in sessions]
+        JobServer.submit(GamitConfig.gamitopt["org"], project, products, date, run_id)
 
     JobServer.wait()
     pbar.close()
     JobServer.close_cluster()
 
 
-def execute_globk(cnn, JobServer, GamitConfig, sessions, dates):
+def execute_globk(cnn, JobServer, GamitConfig, sessions, dates, run_id):
     project = GamitConfig.NetworkConfig.network_id.lower()
 
     tqdm.write(
         " >> %s Combining with GLOBK sessions with more than one subnetwork..."
         % print_datetime()
-    )
-
-    modules = (
-        "os",
-        "shutil",
-        "geode.snxParse",
-        "subprocess",
-        "platform",
-        "traceback",
-        "glob",
-        "geode.dbConnection",
-        "math",
-        "datetime",
-        "geode.pyDate",
-        "geode.gamit.globk_task",
     )
 
     pbar = tqdm(
@@ -702,13 +690,7 @@ def execute_globk(cnn, JobServer, GamitConfig, sessions, dates):
         ncols=100,
     )
 
-    JobServer.create_cluster(
-        run_globk,
-        (globk_task.Globk, gamit_session.GamitSession),
-        job_callback,
-        progress_bar=pbar,
-        modules=modules,
-    )
+    JobServer.create_cluster(run_globk, callback=job_callback, progress_bar=pbar)
 
     net_type = GamitConfig.NetworkConfig.type
 
@@ -760,8 +742,11 @@ def execute_globk(cnn, JobServer, GamitConfig, sessions, dates):
             # folder where the combination (or final solution if single network) should be written to
             pwd_comb = os.path.join(pwd, project + "/glbf")
             # globk combination object
-            globk = globk_task.Globk(pwd_comb, date, GlobkComb, net_type)
-            JobServer.submit(globk, project, date)
+            products = [gamit_session.session_products(s) for s in GlobkComb]
+            options = {k: GamitConfig.gamitopt[k] for k in ("org", "expt", "eop_type")}
+            JobServer.submit(
+                pwd_comb, project, date, products, net_type, options, run_id
+            )
 
     JobServer.wait()
     pbar.close()
@@ -800,20 +785,6 @@ def gamit_callback(job):
                                 f"system {result['system']} -> WARNINGS:\n"
                                 + "\n".join(msg)
                                 + "\n"
-                            )
-                        )
-
-                    # insert information in gamit_stats
-                    try:
-                        cnn = dbConnection.Cnn("gnss_data.cfg")  # type: dbConnection.Cnn
-                        cnn.insert("gamit_stats", **result)
-                        cnn.close()
-                    except dbConnection.dbErrInsert as e:
-                        tqdm.write(
-                            prRed(
-                                f" -- {print_datetime()} Error while inserting GAMIT stat for "
-                                f"{result['session']} system: {result['system']}"
-                                + str(e)
                             )
                         )
 
@@ -870,64 +841,97 @@ def job_callback(job):
         )
 
 
-def run_gamit_session(gamit_task, dir_name, year, doy, dry_run):
-    return gamit_task.start(dir_name, year, doy, dry_run)
+def run_gamit_session(params, dry_run, run_id):
+    with active_day(params["NetName"], params["date"], run_id) as (cnn, check_current):
+        task = gamit_task.GamitTask(
+            params["remote_pwd"] + "." + run_id, params, params["prepared_pwd"]
+        )
+        results = task.start(
+            params["DirName"],
+            task.date.year,
+            task.date.doy,
+            dry_run,
+            check_current=check_current,
+        )
+        # Persist processing statistics before acknowledging success. Losing
+        # the CLI callback after publication cannot unmark finished sessions.
+        successful = [result for result in results if result["success"]]
+        if successful:
+            prepared = Path(params["prepared_pwd"])
+            destination = Path(params["solution_pwd"])
+            marker = ".geode-publish-pending"
+            (prepared / marker).write_text(run_id)
+            subnet = params["subnet_record"]
+            scope = {k: subnet[k] for k in ("Project", "Year", "DOY", "subnet")}
+            fields = cnn.get_columns("gamit_stats")
+            stats = [
+                {k: value for k, value in result.items() if k in fields}
+                for result in successful
+            ]
+
+            def save_stats():
+                with cnn.cnn.transaction():
+                    gamit_session.replace_product(cnn, "gamit_subnets", scope, [subnet])
+                    gamit_session.replace_product(cnn, "gamit_stats", scope, stats)
+
+            check_current()
+            gamit_session.publish_directory(prepared, destination, confirm=save_stats)
+            (destination / marker).unlink()
+        return results
 
 
-def run_globk(globk_task, project, date):
-    from datetime import datetime
+def run_globk(pwd_comb, project, date, products, net_type, options, run_id):
+    with active_day(project, date, run_id) as (cnn, check_current):
+        task = globk_task.Globk(pwd_comb, date, products, net_type, options=options)
 
-    polyhedron, variance = globk_task.execute()
-    # open a database connection (this is on the node)
-    cnn = dbConnection.Cnn("gnss_data.cfg")
-    err = []
+        def store_result(solution):
+            errors = _store_globk(cnn, project, date, *solution)
+            if errors:
+                raise globk_task.GlobkException("\n".join(errors))
 
-    # kill the existing polyhedron to make sure all the new vertices get in
-    # this is because when adding a station, only the
-    cnn.query(
-        'DELETE FROM gamit_soln WHERE "Project" = \'%s\' AND "Year" = %i AND "DOY" = %i'
-        % (project, date.year, date.doy)
-    )
+        task.execute(check_current=check_current, store_result=store_result)
+        return []
 
-    # insert polyherdon in gamit_soln table
+
+def _store_globk(cnn, project, date, polyhedron, variance):
+    if not polyhedron:
+        return [f"No GLOBK coordinates for {project} {date.yyyyddd()}"]
+    rows = []
+    errors = []
+    sqrt_variance = math.sqrt(variance)
     for key, value in polyhedron.items():
-        if "." in key:
-            try:
-                sqrt_variance = math.sqrt(variance)
-                cnn.insert(
-                    "gamit_soln",
-                    NetworkCode=key.split(".")[0],
-                    StationCode=key.split(".")[1],
-                    Project=project,
-                    Year=date.year,
-                    DOY=date.doy,
-                    FYear=date.fyear,
-                    X=value.X,
-                    Y=value.Y,
-                    Z=value.Z,
-                    sigmax=value.sigX * sqrt_variance,
-                    sigmay=value.sigY * sqrt_variance,
-                    sigmaz=value.sigZ * sqrt_variance,
-                    sigmaxy=value.sigXY * sqrt_variance,
-                    sigmaxz=value.sigXZ * sqrt_variance,
-                    sigmayz=value.sigYZ * sqrt_variance,
-                    VarianceFactor=variance,
-                )
-            except dbConnection.dbErrInsert as e:
-                # tqdm.write('    --> Error inserting ' + key + ' -> ' + str(e))
-                pass
-        else:
-            err.append(
-                " -- %s Error while combining with GLOBK -> Invalid key found in session %s -> %s "
-                "polyhedron in database may be incomplete."
-                % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), date.yyyyddd(), key)
+        if "." not in key:
+            errors.append(f"Invalid GLOBK station {key} for {project} {date.yyyyddd()}")
+            continue
+        network, station = key.split(".", 1)
+        rows.append(
+            dict(
+                NetworkCode=network,
+                StationCode=station,
+                Project=project,
+                Year=date.year,
+                DOY=date.doy,
+                FYear=date.fyear,
+                X=value.X,
+                Y=value.Y,
+                Z=value.Z,
+                VarianceFactor=variance,
+                sigmax=value.sigX * sqrt_variance,
+                sigmay=value.sigY * sqrt_variance,
+                sigmaz=value.sigZ * sqrt_variance,
+                sigmaxy=value.sigXY * sqrt_variance,
+                sigmaxz=value.sigXZ * sqrt_variance,
+                sigmayz=value.sigYZ * sqrt_variance,
             )
-    cnn.close()
-    return err
+        )
+    if not errors:
+        gamit_session.replace_day(cnn, "gamit_soln", project, date, rows)
+    return errors
 
 
-def run_parse_ztd(parse_task):
-    return parse_task.execute()
+def run_parse_ztd(org, project, products, date, run_id):
+    with active_day(project, date, run_id) as (cnn, _):
+        return parse_ztd.ParseZtdTask(org, project, products, date).execute(cnn)
 
 
 def execute_gamit(
@@ -940,23 +944,9 @@ def execute_gamit(
     dates: List[pyDate.Date],
     dry_run=False,
     create_kml=False,
+    *,
+    run_id,
 ):
-    modules = (
-        "geode.pyRinex",
-        "datetime",
-        "os",
-        "shutil",
-        "geode.pyProducts",
-        "subprocess",
-        "re",
-        "geode.pyETM",
-        "glob",
-        "platform",
-        "traceback",
-        "geode.gamit.gamit_task",
-        "zipfile",
-    )
-
     tqdm.write(
         " >> %s Creating GAMIT session instances and executing GAMIT, please wait..."
         % print_datetime()
@@ -1004,11 +994,7 @@ def execute_gamit(
     )
     # create the cluster for the run
     JobServer.create_cluster(
-        run_gamit_session,
-        (gamit_task.GamitTask,),
-        gamit_callback,
-        pbar,
-        modules=modules,
+        run_gamit_session, callback=gamit_callback, progress_bar=pbar
     )
 
     for GamitSession in sessions:
@@ -1017,15 +1003,9 @@ def execute_gamit(
             # tqdm.write(' >> %s Init' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             GamitSession.initialize()
             # tqdm.write(' >> %s Done Init' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-            task = gamit_task.GamitTask(
-                GamitSession.remote_pwd, GamitSession.params, GamitSession.solution_pwd
-            )
-            # tqdm.write(' >> %s Done task' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-            JobServer.submit(
-                task, task.params["DirName"], task.date.year, task.date.doy, dry_run
-            )
+            JobServer.submit(GamitSession.params, dry_run, run_id)
 
-            msg = "Submitting for processing"
+            msg = f"Submitting for processing (attempt in {GamitSession.prepared_pwd})"
         else:
             msg = "Session already processed"
             pbar.update()
@@ -1053,9 +1033,11 @@ def execute_gamit(
     # DDG: because of problems with keeping the database connection open (in some platforms), we invoke a class
     # that just performs a select on the database
     timer = DbAlive(cnn, 120)
-    JobServer.wait()
-    pbar.close()
-    timer.stop()
+    try:
+        JobServer.wait()
+    finally:
+        timer.stop()
+        pbar.close()
 
     JobServer.close_cluster()
 

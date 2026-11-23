@@ -124,11 +124,7 @@ def calculate_etms(
         disable=None,
     )
 
-    modules = ("geode.pyETM", "geode.pyDate", "geode.dbConnection", "traceback")
-
-    JobServer.create_cluster(
-        station_etm, progress_bar=qbar, callback=callback_handler, modules=modules
-    )
+    JobServer.create_cluster(station_etm, progress_bar=qbar, callback=callback_handler)
 
     # delete all the solutions from the ETMs table
     cnn.query(

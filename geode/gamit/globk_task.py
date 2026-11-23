@@ -8,10 +8,13 @@ import glob
 import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 # app
 from geode import snxParse
-from geode.Utils import chmod_exec, file_open, stationID
+from geode.gamit.gamit_session import publish_directory, session_products
+from geode.Utils import chmod_exec, file_open
 
 
 class GlobkException(Exception):
@@ -23,13 +26,16 @@ class GlobkException(Exception):
 
 
 class Globk(object):
-    def __init__(self, pwd_comb, date, Sessions, net_type="regional"):
+    def __init__(self, pwd_comb, date, Sessions, net_type="regional", *, options=None):
         self.polyhedron = None
         self.VarianceFactor = None
         self.date = date
-        self.eop = Sessions[0].GamitOpts["eop_type"]
-        self.org = Sessions[0].GamitOpts["org"]
-        self.expt = Sessions[0].GamitOpts["expt"]
+        if options is None:
+            options = Sessions[0].GamitOpts
+            Sessions = [session_products(s) for s in Sessions]
+        self.eop = options["eop_type"]
+        self.org = options["org"]
+        self.expt = options["expt"]
         self.pwd_comb = pwd_comb
         self.Sessions = Sessions  # type: list
         self.h_files = []
@@ -60,46 +66,72 @@ class Globk(object):
 
         chmod_exec(script_path)
 
-    def execute(self, parse_sinex=True):
-        # if multiple session, run globk first, then returned parsed sinex
-        # if single session, then self.pwd_comb points to the folder where the sinex files is
-        if len(self.Sessions) > 1:
-            # need to run globk
-            # try to create the folder
-            if os.path.exists(self.pwd_comb):
-                # if exists, delete and recreate
-                shutil.rmtree(self.pwd_comb)
-            os.makedirs(self.pwd_comb)
+    def execute(self, parse_sinex=True, *, check_current=None, store_result=None):
+        if len(self.Sessions) == 1:
+            result = self.parse_sinex() if parse_sinex else None
+            if store_result is not None:
+                store_result(result)
+            return result
+        # Combination rewrites its working directory. Install only a completed
+        # combination so a failed attempt cannot truncate an earlier result.
+        destination = Path(self.pwd_comb)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix=".globk-", dir=destination.parent
+        ) as temp:
+            staged = Path(temp) / "glbf"
+            staged.mkdir()
+            self.pwd_comb = str(staged)
+            try:
+                self._combine()
+                result = self.parse_sinex() if parse_sinex else None
+                if parse_sinex and not result[0]:
+                    raise GlobkException("GLOBK produced no station coordinates")
+                if check_current is not None:
+                    check_current()
+                publish_directory(
+                    staged,
+                    destination,
+                    confirm=(lambda: store_result(result))
+                    if store_result is not None
+                    else None,
+                )
+            finally:
+                self.pwd_comb = str(destination)
+        return result
 
-            for s in self.Sessions:
-                for glx in glob.glob(os.path.join(s.pwd_glbf, "h*.glx")):
-                    # save the files that have to be copied, the copy process is done on each node
-                    h_file = (
-                        "h"
-                        + s.DirName
-                        + self.date.yyyy()
-                        + self.date.ddd()
-                        + "_"
-                        + self.expt
-                        + ".glx"
-                    )
-                    shutil.copyfile(glx, os.path.join(self.pwd_comb, h_file))
+    def _combine(self):
+        for s in self.Sessions:
+            for glx in glob.glob(os.path.join(s["directory"], "h*.glx")):
+                # save the files that have to be copied, the copy process is done on each node
+                h_file = (
+                    "h"
+                    + s["name"]
+                    + self.date.yyyy()
+                    + self.date.ddd()
+                    + "_"
+                    + self.expt
+                    + ".glx"
+                )
+                shutil.copyfile(glx, os.path.join(self.pwd_comb, h_file))
 
-            self.linktables(self.date.yyyy(), self.eop)
-            self.create_combination_script(self.date, self.org)
+        self.linktables(self.date.yyyy(), self.eop)
+        self.create_combination_script(self.date, self.org)
 
-            # multiple sessions execute globk
-            self.p = subprocess.Popen(
-                "./globk.sh",
-                shell=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=self.pwd_comb,
+        # multiple sessions execute globk
+        self.p = subprocess.Popen(
+            "./globk.sh",
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=self.pwd_comb,
+        )
+
+        self.stdout, self.stderr = self.p.communicate()
+        if self.p.returncode:
+            raise GlobkException(
+                f"GLOBK command exited with status {self.p.returncode}: {self.stderr!r}"
             )
-
-            self.stdout, self.stderr = self.p.communicate()
-
-        return self.parse_sinex() if parse_sinex else None
 
     def create_combination_script(self, date, org):
         # extract the gps week and convert to string
@@ -224,11 +256,11 @@ class Globk(object):
         if self.polyhedron:
             # rename the dict keys to net.stn format (and replace any aliases)
             for GamitSession in self.Sessions:
-                for stn in GamitSession.StationInstances:
+                for alias, network, station in GamitSession["stations"]:
                     # replace the key
                     try:
-                        self.polyhedron[stationID(stn)] = self.polyhedron.pop(
-                            stn.StationAlias.upper()
+                        self.polyhedron[f"{network}.{station}"] = self.polyhedron.pop(
+                            alias.upper()
                         )
                     except KeyError:
                         # maybe the station didn't have a solution

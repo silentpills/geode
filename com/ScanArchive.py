@@ -810,25 +810,7 @@ def scan_rinex(cnn, JobServer, pyArchive, archive_path, master_list, ignore):
     print(" >> Analyzing the archive's structure...")
     pbar = tqdm(ncols=80, unit="crz", disable=None)
 
-    depfuncs = (verify_rinex_date_multiday,)
-    modules = (
-        "geode.dbConnection",
-        "geode.pyDate",
-        "geode.pyRinex",
-        "shutil",
-        "platform",
-        "datetime",
-        "traceback",
-        "geode.pyOptions",
-        "geode.pyEvents",
-        "geode.Utils",
-        "os",
-        "geode.pyRinexName",
-    )
-
-    JobServer.create_cluster(
-        try_insert, dependencies=depfuncs, modules=modules, callback=callback_handle
-    )
+    JobServer.create_cluster(try_insert, callback=callback_handle, progress_bar=pbar)
 
     ignore = ignore[0] == 1
 
@@ -878,23 +860,7 @@ def process_otl(cnn, JobServer, master_list):
 
     pbar = tqdm(total=len(records), ncols=80, disable=None)
 
-    depfuncs = (ecef2lla,)
-    modules = (
-        "geode.dbConnection",
-        "geode.pyRinex",
-        "geode.pyArchiveStruct",
-        "geode.pyOTL",
-        "geode.pyPPP",
-        "numpy",
-        "platform",
-        "geode.pyProducts",
-        "traceback",
-        "geode.pyOptions",
-    )
-
-    JobServer.create_cluster(
-        obtain_otl, depfuncs, callback_handle, progress_bar=pbar, modules=modules
-    )
+    JobServer.create_cluster(obtain_otl, callback=callback_handle, progress_bar=pbar)
 
     for record in records:
         JobServer.submit(record["NetworkCode"], record["StationCode"])
@@ -915,18 +881,8 @@ def scan_station_info(JobServer, pyArchive, archive_path, master_list):
 
     pbar = tqdm(total=len(stninfo), ncols=80, disable=None)
 
-    modules = (
-        "geode.dbConnection",
-        "geode.metadata.station_info",
-        "sys",
-        "datetime",
-        "geode.pyDate",
-        "platform",
-        "traceback",
-    )
-
     JobServer.create_cluster(
-        insert_stninfo, callback=callback_handle, progress_bar=pbar, modules=modules
+        insert_stninfo, callback=callback_handle, progress_bar=pbar
     )
 
     for stninfofile, stninfopath in zip(stninfo, path2stninfo):
@@ -1132,32 +1088,7 @@ def process_ppp(
 
     pbar = tqdm(total=len(tblrinex), ncols=80, disable=None)
 
-    modules = (
-        "geode.dbConnection",
-        "geode.pyRinex",
-        "geode.pyPPP",
-        "geode.metadata.station_info",
-        "geode.pyDate",
-        "geode.pyProducts",
-        "os",
-        "platform",
-        "geode.pyArchiveStruct",
-        "traceback",
-        "geode.pyOptions",
-        "geode.pyEvents",
-        "geode.Utils",
-        "numpy",
-    )
-
-    depfuncs = (remove_from_archive, verify_rinex_date_multiday)
-
-    JobServer.create_cluster(
-        execute_ppp,
-        depfuncs,
-        callback=callback_handle,
-        progress_bar=pbar,
-        modules=modules,
-    )
+    JobServer.create_cluster(execute_ppp, callback=callback_handle, progress_bar=pbar)
 
     for record in tblrinex:
         rinex_path = pyArchive.build_rinex_path(
