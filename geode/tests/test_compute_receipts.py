@@ -10,6 +10,19 @@ from geode import compute_receipts as receipts
 def test_duplicate_deliveries_share_exactly_one_claim(postgres_connection, monkeypatch):
     db = postgres_connection
     db.execute(files("geode").joinpath("sql/compute_jobs_v1.sql").read_text())
+    db.execute("CREATE ROLE runtime_test")
+    db.execute("GRANT ALL ON public.geode_compute_jobs TO runtime_test")
+    db.execute(files("geode").joinpath("sql/compute_private_v1.sql").read_text())
+    assert db.execute(
+        "SELECT has_schema_privilege('runtime_test', 'geode_compute', 'USAGE'), "
+        "has_table_privilege('runtime_test', 'geode_compute.jobs', 'UPDATE')"
+    ).fetchone() == (False, False)
+    # A CLI-first installation can subsequently run the full Django chain.
+    for name in ("compute_jobs_v1.sql", "compute_private_v1.sql"):
+        db.execute(files("geode").joinpath("sql", name).read_text())
+    assert db.execute("SELECT to_regclass('public.geode_compute_jobs')").fetchone() == (
+        None,
+    )
     for key, value in (
         ("HOST", db.info.host),
         ("PORT", str(db.info.port)),

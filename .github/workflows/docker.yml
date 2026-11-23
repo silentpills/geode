@@ -60,6 +60,7 @@ jobs:
           docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U geode_app -d pgamit -c "
             DO \$\$ BEGIN
               IF current_setting('is_superuser') != 'off' OR has_schema_privilege('public', 'CREATE')
+                OR has_schema_privilege('geode_compute', 'USAGE')
                 OR NOT has_table_privilege('api_user', 'INSERT')
               THEN RAISE EXCEPTION 'Incorrect application database privileges'; END IF;
             END \$\$;"

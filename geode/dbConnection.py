@@ -307,14 +307,13 @@ def run_db_migrations(cnn: "Cnn"):
             )
 
     if not cnn.query_float(
-        "SELECT to_regclass('public.geode_compute_jobs') IS NOT NULL "
-        "AND to_regclass('public.geode_gamit_runs') IS NOT NULL AS ready",
+        "SELECT to_regclass('geode_compute.jobs') IS NOT NULL "
+        "AND to_regclass('geode_compute.gamit_runs') IS NOT NULL AS ready",
         as_dict=True,
     )[0]["ready"]:
         with cnn.cnn.transaction():
-            cnn.cursor.execute(
-                files("geode").joinpath("sql/compute_jobs_v1.sql").read_text()
-            )
+            for name in ("compute_jobs_v1.sql", "compute_private_v1.sql"):
+                cnn.cursor.execute(files("geode").joinpath("sql", name).read_text())
 
     ##################################################################
     # Index events(EventDate) and stacks(name): both are queried/filtered

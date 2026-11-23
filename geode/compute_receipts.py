@@ -9,12 +9,13 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import dict_row
 
-from geode.config import get_db_config, get_gnss_data_cfg_path
+from geode.config import get_db_config
 
 
 def _connect():
     legacy = configparser.ConfigParser(interpolation=None)
-    legacy.read(get_gnss_data_cfg_path())
+    # Processing CLIs use this working-directory file for legacy database settings.
+    legacy.read("gnss_data.cfg")
     db = get_db_config(legacy["postgres"] if legacy.has_section("postgres") else None)
     return psycopg.connect(
         host=db["hostname"],
@@ -48,7 +49,7 @@ def register(job_id, operation, fingerprint, label=None):
     """Record a new UUID before publishing its message."""
     with _connect() as cnn:
         cnn.execute(
-            "INSERT INTO public.geode_compute_jobs (id, operation, fingerprint, label) "
+            "INSERT INTO geode_compute.jobs (id, operation, fingerprint, label) "
             "VALUES (%s, %s, %s, %s)",
             (job_id, operation, fingerprint, label),
         )
@@ -59,7 +60,7 @@ def claim(job_id, operation, fingerprint):
     with _connect() as cnn:
         return (
             cnn.execute(
-                "UPDATE public.geode_compute_jobs SET state='running', started_at=now() "
+                "UPDATE geode_compute.jobs SET state='running', started_at=now() "
                 "WHERE id=%s AND operation=%s AND fingerprint=%s AND state='queued'",
                 (job_id, operation, fingerprint),
             ).rowcount
@@ -72,7 +73,7 @@ def cancel(job_id):
     with _connect() as cnn:
         return (
             cnn.execute(
-                "UPDATE public.geode_compute_jobs SET state='cancelled', finished_at=now() "
+                "UPDATE geode_compute.jobs SET state='cancelled', finished_at=now() "
                 "WHERE id=%s AND state='queued'",
                 (job_id,),
             ).rowcount
@@ -85,7 +86,7 @@ def finish(job_id, state, detail=None):
         raise ValueError("Expected a terminal execution state")
     with _connect() as cnn:
         changed = cnn.execute(
-            "UPDATE public.geode_compute_jobs SET state=%s, finished_at=now(), detail=%s "
+            "UPDATE geode_compute.jobs SET state=%s, finished_at=now(), detail=%s "
             "WHERE id=%s AND state='running'",
             (state, detail, job_id),
         ).rowcount
@@ -96,7 +97,7 @@ def finish(job_id, state, detail=None):
 def status(job_id):
     with _connect() as cnn:
         return cnn.execute(
-            "SELECT * FROM public.geode_compute_jobs WHERE id=%s", (job_id,)
+            "SELECT * FROM geode_compute.jobs WHERE id=%s", (job_id,)
         ).fetchone()
 
 
@@ -118,7 +119,7 @@ def main():
     else:
         with _connect() as cnn:
             for row in cnn.execute(
-                "SELECT id, operation, label, state, submitted_at FROM public.geode_compute_jobs "
+                "SELECT id, operation, label, state, submitted_at FROM geode_compute.jobs "
                 "ORDER BY submitted_at DESC LIMIT 25"
             ):
                 print(
