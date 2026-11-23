@@ -92,6 +92,7 @@ class Job:
     result: object = None
     exception: str | None = None
     ip_addr: str | None = None
+    infrastructure_error: str | None = None
 
 
 @dataclass
@@ -227,6 +228,7 @@ class JobServer:
             if self.cancelling:
                 return
             if infrastructure_error:
+                job.infrastructure_error = str(infrastructure_error)
                 with self.condition:
                     self.failures.append(infrastructure_error)
             if self.progress_bar is not None:
@@ -295,6 +297,7 @@ class JobServer:
         from redis.exceptions import ConnectionError as RedisConnectionError
         from redis.exceptions import TimeoutError as RedisTimeout
 
+        from geode.compute import ProcessingFunctionError
         from geode.compute_wire import decode
 
         while True:
@@ -318,6 +321,9 @@ class JobServer:
                     output = handle.get(propagate=True, timeout=1)
                     job.ip_addr = output["worker"]
                     job.result = decode(output["result"])
+                except ProcessingFunctionError as exc:
+                    # Download conversion callbacks may recover using another source.
+                    job.exception = str(exc)
                 except (
                     CeleryTimeout,
                     OperationalError,

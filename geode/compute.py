@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import traceback
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
@@ -35,6 +36,10 @@ OPERATIONS = {
     "com.ScanArchive.execute_ppp",
     "com.Stacker.station_etm",
 }
+
+
+class ProcessingFunctionError(Exception):
+    """A confirmed exception from an invoked processing function, deliverable to its callback."""
 
 
 def operation_name(function):
@@ -150,11 +155,14 @@ def execute(self, operation, arguments, batch_id, checks):
         _check_environment(batch_id, checks)
         module_name, function_name = operation.rsplit(".", 1)
         function = getattr(import_module(module_name), function_name)
-        result = function(*args)
+        try:
+            result = function(*args)
+        except Exception as exc:
+            raise ProcessingFunctionError(traceback.format_exc()) from exc
         failed = reported_failure(operation, args, result)
         output = {"result": compute_wire.encode(result), "worker": socket.gethostname()}
     except Exception as exc:
-        compute_receipts.finish(job_id, "failed", type(exc).__name__)
+        compute_receipts.finish(job_id, "failed", type(exc.__cause__ or exc).__name__)
         raise
     if failed:
         compute_receipts.finish(

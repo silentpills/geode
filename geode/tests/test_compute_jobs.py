@@ -299,6 +299,31 @@ def check_interrupted_worker(cnn, worker, env):
         publish(job_id)
         children[0].kill()
 
+    # Confirm application errors retain their type through Celery's JSON backend.
+    # An actual failed converter can then be handled via the downloader fallback.
+    conversion = "com.DownloadSources.process_file"
+    bad_file = compute_wire.encode(
+        (
+            "/unconfigured",
+            str(Path(env["POSTGRES_HOST"]) / "missing.obs"),
+            "default_format",
+            "abcd",
+        )
+    )
+    failed_id = str(uuid4())
+    compute_receipts.register(
+        failed_id, conversion, compute_wire.fingerprint(conversion, bad_file, checks)
+    )
+    failed = producer.send_task(
+        "geode.compute.execute.v1",
+        (conversion, bad_file, str(uuid4()), checks),
+        task_id=failed_id,
+        queue=compute.QUEUE,
+    )
+    with pytest.raises(compute.ProcessingFunctionError):
+        failed.get(timeout=30)
+    assert receipt(failed_id)[0] == "failed"
+
     # Replay the original after the child was lost. A different valid job acts
     # as a FIFO barrier showing that the replacement child actually consumed work.
     publish(job_id)
@@ -399,3 +424,49 @@ def test_cancelling_serial_batch_skips_pending_call(monkeypatch):
             server.submit_async(3)
         release.set()
     assert ran == [1]
+
+
+@pytest.mark.parametrize("unconfirmed", [False, True])
+def test_callback_recovers_only_confirmed_failure(monkeypatch, unconfirmed):
+    from unittest.mock import Mock
+
+    from com.DownloadSources import process_file
+
+    monkeypatch.setattr(pyJobServer, "check_processing_environment", lambda *_: None)
+    seen = []
+    with pyJobServer.JobServer(SimpleNamespace(run_parallel=False)) as server:
+        server.run_parallel = True
+
+        def enqueue(job_id, side_effect=None):
+            job = pyJobServer.Job(job_id)
+            handle = Mock()
+            handle.get.side_effect = side_effect
+            handle.get.return_value = {"worker": "fixture", "result": None}
+            with server.condition:
+                server.jobs[job.id] = (job, handle, time.monotonic() + 3)
+                server.condition.notify_all()
+
+        def callback(job):
+            seen.append((job.id, bool(job.exception), bool(job.infrastructure_error)))
+            if job.exception and not job.infrastructure_error:
+                enqueue("fallback-source")
+
+        server.create_cluster(process_file, callback=callback)
+        error = (
+            RuntimeError("worker lost")
+            if unconfirmed
+            else compute.ProcessingFunctionError("invalid input file")
+        )
+        enqueue("first-source", error)
+        if unconfirmed:
+            with pytest.raises(
+                RuntimeError, match="Unable to confirm successful execution"
+            ):
+                server.wait()
+            assert seen == [("first-source", True, True)]
+        else:
+            server.wait()
+            assert seen == [
+                ("first-source", True, False),
+                ("fallback-source", False, False),
+            ]
