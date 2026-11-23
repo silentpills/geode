@@ -378,7 +378,10 @@ class DatabaseError(psycopg.DatabaseError):
 
 
 class Cnn(object):
-    def __init__(self, configfile=None, use_float=False, write_cfg_file=False):
+    def __init__(
+        self, configfile=None, use_float=False, write_cfg_file=False, *, migrate=True
+    ):
+        """Open a processing connection. Web requests use an already migrated database."""
         self.active_transaction = False
 
         # -----------------------------------------------------------------
@@ -442,7 +445,8 @@ class Cnn(object):
 
                 debug("Database connection established")
 
-                run_db_migrations(self)
+                if migrate:
+                    run_db_migrations(self)
 
             except psycopg.Error as e:
                 raise e

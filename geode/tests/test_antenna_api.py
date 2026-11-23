@@ -84,6 +84,23 @@ def station_payload():
     )
 
 
+def test_completion_plot_needs_only_database_read_access(api_db, monkeypatch, tmp_path):
+    from api.models import Stations
+    from api.views import RinexCompletionPlot
+    from rest_framework.test import APIRequestFactory
+
+    with api_db.cursor() as cursor:
+        cursor.execute("CREATE ROLE plot_reader LOGIN")
+        cursor.execute("GRANT SELECT ON rinex_proc TO plot_reader")
+    station_id = Stations.objects.get(station_code="test").pk
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("POSTGRES_USER", "plot_reader")
+    view = RinexCompletionPlot.as_view(authentication_classes=[], permission_classes=[])
+    response = view(APIRequestFactory().get("/"), station_api_id=station_id)
+    assert response.status_code == 200, response.data
+    assert response.data["completion_plot"].startswith("iVBOR")  # Base64 PNG
+
+
 def test_station_serializer_create_and_partial_updates(api_db):
     from api.serializers import StationinfoSerializer
 

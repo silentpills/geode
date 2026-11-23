@@ -15,7 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote as urlquote
 
-from geode.config import get_db_config, get_gnss_data_cfg_path
+from geode.config import get_db_config
 
 # =============================================================================
 # Celery Configuration
@@ -65,10 +65,6 @@ RINEX_STATUS_DATE_SPAN_SECONDS = os.getenv("RINEX_STATUS_DATE_SPAN_SECONDS", "10
 
 USER_ID_TO_SAVE_FILES = os.getenv("USER_ID_TO_SAVE_FILES", "1000")
 GROUP_ID_TO_SAVE_FILES = os.getenv("GROUP_ID_TO_SAVE_FILES", "1000")
-
-# Path to gnss_data.cfg (used by API views that call into geode library code).
-# Reads from GNSS_CONFIG_FILE env var; defaults to gnss_data.cfg in cwd.
-CONFIG_FILE_ABSOLUTE_PATH = get_gnss_data_cfg_path()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

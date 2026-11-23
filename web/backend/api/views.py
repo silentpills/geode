@@ -530,7 +530,7 @@ class TimeSeries(CustomListAPIView):
 
         params = self._check_params(request)
 
-        cnn = dbConnection.Cnn(settings.CONFIG_FILE_ABSOLUTE_PATH)
+        cnn = dbConnection.Cnn(migrate=False)
         try:
             if params["solution"] == "GAMIT":
                 safe_stack = utils.validate_sql_literal(params["stack"], "stack")
@@ -1708,7 +1708,7 @@ class RinexCompletionPlot(APIView):
 
     def get(self, request, station_api_id, format=None):
         station = self.get_queryset(station_api_id)
-        cnn = dbConnection.Cnn(settings.CONFIG_FILE_ABSOLUTE_PATH)
+        cnn = dbConnection.Cnn(migrate=False)
         try:
             completion_plot = pyUtils.plot_rinex_completion(cnn,
                                                             station.network_code.network_code, station.station_code, True)
@@ -2175,7 +2175,7 @@ class InsertStationInfoByFile(APIView):
         succesfully_inserted = []
 
         try:
-            cnn = dbConnection.Cnn(settings.CONFIG_FILE_ABSOLUTE_PATH)
+            cnn = dbConnection.Cnn(migrate=False)
 
             pgamit_stationinfo = pyStationInfo.StationInfo(
                 cnn=cnn, NetworkCode=station.network_code.network_code, StationCode=station.station_code, allow_empty=True)

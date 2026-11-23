@@ -305,7 +305,7 @@ class TimeSeriesConfigUtils:
         if check_params:
             params = self._check_params(request)
 
-        self.cnn = dbConnection.Cnn(settings.CONFIG_FILE_ABSOLUTE_PATH)
+        self.cnn = dbConnection.Cnn(migrate=False)
 
         try:
 
@@ -637,7 +637,7 @@ class EarthquakeUtils:
             raise exceptions.CustomServerErrorExceptionHandler(
                 "earthquake must be an instance of models.Earthquake")
 
-        cnn = dbConnection.Cnn(settings.CONFIG_FILE_ABSOLUTE_PATH)
+        cnn = dbConnection.Cnn(migrate=False)
 
         eq_t = pyOkada.EarthquakeTable(cnn, earthquake.id)
 
